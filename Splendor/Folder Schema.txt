@@ -1,0 +1,24 @@
+Splendor
+	run.py
+
+	Environment
+		__init__.py
+		game.py
+
+		Splendor_components
+			__init__.py
+
+			Board_components
+				__init__.py
+				board.py
+				deck.py
+				Splendor_cards.xlsx
+
+			Player_components
+				__init__.py
+				player.py
+				strategy.py
+	RL
+		__init__.py
+		model.py
+		training.py
