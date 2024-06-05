@@ -27,9 +27,14 @@ class Card:
         return gem_one_hot + [self.points, 
                               self.cost['white'], self.cost['blue'], self.cost['green'], self.cost['red'], self.cost['black']]
     
-    def __repr__(self):
-        return f'Card(ID: {self.id}, Gem: {self.gem}, Points: {self.points}, Cost: {self.cost})'
-
+    def to_dict(self):
+        return {
+            'id': self.id,
+            'tier': self.tier,
+            'gem': self.gem,
+            'points': self.points,
+            'cost': self.cost
+        }
 
 class Deck:
     def __init__(self, tier):

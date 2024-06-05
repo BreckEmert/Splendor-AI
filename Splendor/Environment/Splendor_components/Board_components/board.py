@@ -10,35 +10,34 @@ class Board:
         self.gems = {'white': gems, 'blue': gems, 'green': gems, 'red': gems, 'black': gems, 'gold': 5}
 
         # Decks
-        self.tier1 = Deck('tier1')
-        self.tier2 = Deck('tier2')
-        self.tier3 = Deck('tier3')
         self.nobles = Deck('nobles')
+        self.tier3 = Deck('tier3')
+        self.tier2 = Deck('tier2')
+        self.tier1 = Deck('tier1')
 
         self.deck_mapping = {
             'tier1': self.tier1,
             'tier2': self.tier2,
             'tier3': self.tier3
         }
+        self.card_id_map = {card.id: card for tier in self.cards.values() for card in tier}
         
         # Active cards
         self.cards = {
+            'nobles': [self.nobles.draw() for _ in range(num_players+1)], 
             'tier1': [self.tier1.draw() for _ in range(4)],
             'tier2': [self.tier2.draw() for _ in range(4)],
-            'tier3': [self.tier3.draw() for _ in range(4)],
-            'nobles': [self.nobles.draw() for _ in range(num_players+1)]
+            'tier3': [self.tier3.draw() for _ in range(4)]
         }
     
     def get_card_by_id(self, card_id):
-        for tier in ['tier1', 'tier2', 'tier3']:
-            for card in self.cards[tier]:
-                if card.id == card_id:
-                    return card
+        return self.card_id_map[card_id]
                 
-    def take_gems(self, gem, amount):
-        self.gems[gem] -= amount
+    def change_gems(self, gems_to_change):
+        for gem, amount in gems_to_change.items():
+            self.gems[gem] += amount
 
-    def buy_card(self, card_id):
+    def take_card(self, card_id):
         card = self.get_card_by_id(card_id)
         self.cards[card.tier].remove(card)
         self.cards[card.tier].append(self.deck_mapping[card.tier].draw())
@@ -65,8 +64,11 @@ class Board:
     
     def get_state(self):
         return {
-            'Gems': self.gems, 
-            'Cards': self.cards
+            'gems': self.gems, 
+            'cards': {
+                tier: [card.id for card in cards]
+                for tier, cards in self.cards.items()
+            }
         }
     
     def to_vector(self):

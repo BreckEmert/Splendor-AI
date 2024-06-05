@@ -9,5 +9,7 @@ if __name__ == "__main__":
 
     from RL import train_agent
 
-    model_save_path = 'rl_agent_model.keras'
-    train_agent(model_save_path)
+    model_save_path = 'RL/trained_agents/rl_agent_model.keras'
+    log_path = "C:/Users/Public/Documents/Python_Files/Splendor/RL/trained_agents/game_logs"
+
+    train_agent(model_save_path, log_path)
