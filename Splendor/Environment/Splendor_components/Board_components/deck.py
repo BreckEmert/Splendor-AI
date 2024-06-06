@@ -36,6 +36,7 @@ class Card:
             'cost': self.cost
         }
 
+    
 class Deck:
     def __init__(self, tier):
         self.tier = tier
@@ -58,10 +59,9 @@ class Deck:
     def draw(self):
         return self.cards.pop() if self.cards else None
     
-    def __repr__(self):
-        return f'Deck: {self.tier} with {len(self.cards)} cards remaining'
+    def __len__(self):
+        return len(self.cards)
     
-
 if __name__ == "__main__":
     import sys
 

@@ -9,16 +9,20 @@ from Environment.Splendor_components.Player_components.strategy import ( # type:
 )
 
 
-def train_agent(model_save_path, log_path):
+def train_agent(base_save_path, log_path, layer_sizes, model_paths=None):
     from Environment.game import Game # type: ignore
-    # Players and strategies (BestStrategy for training perfectly)
-    players = [('Player1', BestStrategy(), 1), ('Player2', BestStrategy(), 1)]
     
-    state_size = 263  # ADJUST LATER
-    batch_size = 32
+    # Players and strategies (BestStrategy for training perfectly)
+    players = [
+        ('Player1', BestStrategy(), 1, layer_sizes, model_paths[0] if model_paths else None),
+        ('Player2', BestStrategy(), 1, layer_sizes, model_paths[1] if model_paths else None)
+    ]
+    
+    state_size = 247  # ADJUST LATER
 
     # Training loop
-    for episode in range(1000):  # Number of games
+    for episode in range(1):  # Number of games
+        logging = False
         game = Game(players)
         state = np.array(game.to_vector())
         state = np.reshape(state, [1, state_size])
@@ -50,23 +54,21 @@ def train_agent(model_save_path, log_path):
 
             # Update state
             state = next_state
-
-            if len(active_player.rl_model.memory) > batch_size:
-                active_player.rl_model.replay()
         
         # Final rewards
         for player in game.players:
-            final_reward = 10 if player == game.victor else -10
+            player.rl_model.replay()
+            final_reward = 5 if player == game.victor else -5
             for state, action, reward, next_state, done in reversed(player.rl_model.memory):
                 player.rl_model.train(state, action, final_reward, next_state, done)
 
+            # Decay epsilon
+            if player.rl_model.epsilon > player.rl_model.epsilon_min:
+                player.rl_model.epsilon *= player.rl_model.epsilon_decay
+
         # Log the progress
-        print(f"Episode {episode+1}/1000")
+        print(f"Episode {episode+1} complete and took {game.half_turns} turns")
 
     # Save models
     for player in game.players:
-        player.rl_model.save_model(f"{model_save_path}_{player.name}")
-
-if __name__ == '__main__':
-    model_save_path = 'rl_agent_model.keras'
-    train_agent(model_save_path)
+        player.rl_model.save_model(base_save_path, player.name)
