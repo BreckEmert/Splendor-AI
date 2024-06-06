@@ -20,9 +20,7 @@ class Board:
             'tier2': self.tier2,
             'tier3': self.tier3
         }
-        self.card_id_map = {card.id: card for tier in self.cards.values() for card in tier}
         
-        # Active cards
         self.cards = {
             'nobles': [self.nobles.draw() for _ in range(num_players+1)], 
             'tier1': [self.tier1.draw() for _ in range(4)],
@@ -31,7 +29,10 @@ class Board:
         }
     
     def get_card_by_id(self, card_id):
-        return self.card_id_map[card_id]
+        for tier in ['tier1', 'tier2', 'tier3']:
+            for card in self.cards[tier]:
+                if card.id == card_id:
+                    return card
                 
     def change_gems(self, gems_to_change):
         for gem, amount in gems_to_change.items():

@@ -34,50 +34,75 @@ class Player:
         self.reserved_cards.append(card)
 
     def get_legal_moves(self, board):
-        non_zero_gems = [gem for gem in board.gems if gem != 'gold' and board.gems[gem] > 0]
-        len_nzg = len(non_zero_gems)
-        total_gems = sum(self.gems.values())
-        take_2_count = take_3_count = 0
-        take_1 = take_2 = take_2_diff = take_3 = []
+            non_zero_gems = [gem for gem in board.gems if gem != 'gold' and board.gems[gem] > 0]
+            len_nzg = len(non_zero_gems)
+            total_gems = sum(self.gems.values())
+            take_2_count = take_3_count = 0
+            take_1 = take_2 = take_2_diff = take_3 = []
 
-        # Take 3 different gems
-        for i in range(len_nzg):
-            for j in range(i + 1, len_nzg):
-                for k in range(j + 1, len_nzg):
-                    take_3.append(('take', {non_zero_gems[i]: -1, non_zero_gems[j]: -1, non_zero_gems[k]: -1}))
-        legal_moves = self.handle_discards(take_3, total_gems, max_gems=10)
-
-        # Take 2 of the same gem if at least 4 available
-        for gem, count in board.gems.items():
-            if gem != 'gold' and count >= 4:
-                take_2.append(('take', {gem: -2}))
-        legal_moves += self.handle_discards(take_2, total_gems, max_gems=10)
-
-        # Take 2 different gems if no legal take 3s
-        if take_3_count == 0:
+            # Take 3 different gems
             for i in range(len_nzg):
                 for j in range(i + 1, len_nzg):
-                    take_2_diff.append(('take', {non_zero_gems[i]: -1, non_zero_gems[j]: -1}))
-                    take_2_count += 1
-        legal_moves += self.handle_discards(take_2_diff, total_gems, max_gems=10)
+                    for k in range(j + 1, len_nzg):
+                        take_3.append(('take', {non_zero_gems[i]: -1, non_zero_gems[j]: -1, non_zero_gems[k]: -1}))
+            legal_moves = self.handle_discards(take_3, total_gems, max_gems=10)
 
-        # Take 1 gem if no legal takes
-        if take_2_count == 0:
+            # Take 2 of the same gem if at least 4 available
             for gem, count in board.gems.items():
-                if gem != 'gold' and count > 0:
-                    take_1.append(('take', {gem: -1}))
-        legal_moves += self.handle_discards(take_1, total_gems, max_gems=10)
-        
-        # Reserve card
-        if len(self.reserved_cards) < 3:
+                if gem != 'gold' and count >= 4:
+                    take_2.append(('take', {gem: -2}))
+            legal_moves += self.handle_discards(take_2, total_gems, max_gems=10)
+
+            # Take 2 different gems if no legal take 3s
+            if take_3_count == 0:
+                for i in range(len_nzg):
+                    for j in range(i + 1, len_nzg):
+                        take_2_diff.append(('take', {non_zero_gems[i]: -1, non_zero_gems[j]: -1}))
+                        take_2_count += 1
+            legal_moves += self.handle_discards(take_2_diff, total_gems, max_gems=10)
+
+            # Take 1 gem if no legal takes
+            if take_2_count == 0:
+                for gem, count in board.gems.items():
+                    if gem != 'gold' and count > 0:
+                        take_1.append(('take', {gem: -1}))
+            legal_moves += self.handle_discards(take_1, total_gems, max_gems=10)
+            
+            # Reserve card
+            if len(self.reserved_cards) < 3:
+                for tier in ['tier1', 'tier2', 'tier3']:
+                    for card in board.cards[tier]:
+                        legal_moves.append(('reserve', card.id))
+                    legal_moves.append(('reserve_top', tier)) # Reserve unknown top of decks
+
+            # Buy card
             for tier in ['tier1', 'tier2', 'tier3']:
                 for card in board.cards[tier]:
-                    legal_moves.append(('reserve', card.id))
-                legal_moves.append(('reserve_top', tier)) # Reserve unknown top of decks
+                    can_afford = True
+                    gold_needed = 0
+                    gold_combinations = []
 
-        # Buy card
-        for tier in ['tier1', 'tier2', 'tier3']:
-            for card in board.cards[tier]:
+                    for gem, amount in card.cost.items():
+                        if self.gems[gem] < amount:
+                            gold_needed += amount - self.gems[gem]
+                            gold_combinations.append((gem, amount - self.gems[gem]))
+                            if gold_needed > self.gems['gold']:
+                                can_afford = False
+                                break
+
+                    if can_afford:
+                        legal_moves.append(('buy', card.id))
+                        if gold_combinations:
+                            for comb in combinations(gold_combinations, min(gold_needed, len(gold_combinations))):
+                                comb_dict = {gem: gold_amount for gem, gold_amount in comb}
+                                total_cost = {gem: card.cost[gem] for gem in card.cost}
+                                for gem, amount in comb_dict.items():
+                                    total_cost[gem] = total_cost.get(gem, 0) - amount
+                                total_cost['gold'] = gold_needed
+                                legal_moves.append(('buy_with_gold', {'card_id': card.id, 'cost': total_cost}))
+            
+            # Buy reserved card
+            for card in self.reserved_cards:
                 can_afford = True
                 gold_needed = 0
                 gold_combinations = []
@@ -91,7 +116,7 @@ class Player:
                             break
 
                 if can_afford:
-                    legal_moves.append(('buy', card.id))
+                    legal_moves.append(('buy_reserved', card.id))
                     if gold_combinations:
                         for comb in combinations(gold_combinations, min(gold_needed, len(gold_combinations))):
                             comb_dict = {gem: gold_amount for gem, gold_amount in comb}
@@ -99,34 +124,9 @@ class Player:
                             for gem, amount in comb_dict.items():
                                 total_cost[gem] = total_cost.get(gem, 0) - amount
                             total_cost['gold'] = gold_needed
-                            legal_moves.append(('buy_with_gold', {'card_id': card.id, 'cost': total_cost}))
-        
-        # Buy reserved card
-        for card in self.reserved_cards:
-            can_afford = True
-            gold_needed = 0
-            gold_combinations = []
+                            legal_moves.append(('buy_reserved_with_gold', {'card_id': card.id, 'cost': total_cost}))
 
-            for gem, amount in card.cost.items():
-                if self.gems[gem] < amount:
-                    gold_needed += amount - self.gems[gem]
-                    gold_combinations.append((gem, amount - self.gems[gem]))
-                    if gold_needed > self.gems['gold']:
-                        can_afford = False
-                        break
-
-            if can_afford:
-                legal_moves.append(('buy_reserved', card.id))
-                if gold_combinations:
-                    for comb in combinations(gold_combinations, min(gold_needed, len(gold_combinations))):
-                        comb_dict = {gem: gold_amount for gem, gold_amount in comb}
-                        total_cost = {gem: card.cost[gem] for gem in card.cost}
-                        for gem, amount in comb_dict.items():
-                            total_cost[gem] = total_cost.get(gem, 0) - amount
-                        total_cost['gold'] = gold_needed
-                        legal_moves.append(('buy_reserved_with_gold', {'card_id': card.id, 'cost': total_cost}))
-
-        return legal_moves
+            return legal_moves
 
     def handle_discards(self, moves, total_gems, max_gems):
         legal_moves = []
@@ -153,7 +153,7 @@ class Player:
                     discard_dict[gem] = -1 #
             discard_combinations.append(discard_dict)
         return discard_combinations
-
+    
     def legal_to_vector(self, legal_moves):
         format_vector = [
             ('take', {'white': -1, 'blue': -1, 'green': -1}), # Take 1*3 of 5 gems
