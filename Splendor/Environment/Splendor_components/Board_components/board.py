@@ -40,15 +40,15 @@ class Board:
         for gem, amount in gems_to_change.items():
             self.gems[gem] += amount
 
-    def take_card(self, card_id):
-        card = self.get_card_by_id(card_id)
-        self.cards[card.tier].remove(card)
-        new_card = self.deck_mapping[card.tier].draw()
+    def take_card(self, tier, position):
+        card = self.cards[tier][position]
+        self.cards[tier].remove(position)
+        new_card = self.deck_mapping[tier].draw()
         if new_card:
-            self.cards[card.tier].append(new_card)
+            self.cards[tier][position] = new_card
         return card
     
-    def reserve(self, card_id):
+    def reserve(self, tier, position):
         # Give gold if available
         gold = 0
         if self.gems['gold']:
@@ -56,11 +56,7 @@ class Board:
             gold = 1
 
         # Replace card
-        card = self.get_card_by_id(card_id)
-        self.cards[card.tier].remove(card)
-        new_card = self.deck_mapping[card.tier].draw()
-        if new_card:
-            self.cards[card.tier].append(new_card)
+        card = self.take_card(tier, position)
         return card, gold
     
     def reserve_from_deck(self, tier):

@@ -43,7 +43,7 @@ class RLAgent:
         else:
             act_values = self.model.predict(state, verbose=0)[0]  # All actions
 
-        # Filter out illegal moves
+        # Illegal move filter
         act_values = [act_values[i] if legal_mask[i] == 1 else -np.inf for i in range(len(act_values))]
         return act_values
 
