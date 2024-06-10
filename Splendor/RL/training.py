@@ -35,6 +35,7 @@ def train_agent(base_save_path, log_path, layer_sizes, model_paths=None):
 
         while not game.victor:
             game.turn()  # Take a turn
+            # IF WERE CALLING TURN() WHICH DOES THE PLAYER STUFF, ITS MEMORY NEEDS TO BE PUT ON AFTER WE CALL REGULAR REMEMBER() NOT BEFORE
             next_state = np.array(game.to_vector())
             next_state = np.reshape(next_state, [1, state_size])
 
@@ -46,11 +47,21 @@ def train_agent(base_save_path, log_path, layer_sizes, model_paths=None):
             active_player = game.active_player
             active_player.rl_model.remember(
                 state, 
-                active_player.move_index,  # Chosen move
+                active_player.move_index, 
                 game.reward, 
                 next_state, 
                 1 if game.victor else 0
             )
+            if active_player.local_memory:
+                for game_state, move_index in active_player.local_memory:
+                    active_player.rl_model.remember(
+                        game_state, 
+                        move_index, 
+                        0, 
+                        next_state, # NEED A NEXT STATE
+                        0
+                    )
+                active_player.local_memory = []
 
             # Update state
             state = next_state
