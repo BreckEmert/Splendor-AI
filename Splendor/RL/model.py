@@ -5,15 +5,16 @@ import os
 from collections import deque
 from keras.models import load_model
 
+
 class RLAgent:
     def __init__(self, layer_sizes, model_path=None):
         self.state_size = 247 # Size of state vector
-        self.action_size = 303 # Maximum number of actions
+        self.action_size = 61 # Maximum number of actions 
         self.memory = deque(maxlen=500)
         self.gamma = 0.95  # discount rate
         self.epsilon = 0.5  # exploration rate
         self.epsilon_min = 0.01
-        self.epsilon_decay = 0.995
+        self.epsilon_decay = 0.95
         self.learning_rate = 0.0001
 
         self.layer_sizes = layer_sizes
@@ -37,22 +38,24 @@ class RLAgent:
         return model
 
     def get_predictions(self, state, legal_mask):
-        state = np.reshape(state, [1, self.state_size]) # In case of only 1 state
+        state = np.reshape(state, [1, self.state_size])
         if np.random.rand() <= self.epsilon:
             act_values = np.random.rand(self.action_size)  # Exploration
         else:
             act_values = self.model.predict(state, verbose=0)[0]  # All actions
 
         # Illegal move filter
-        act_values = [act_values[i] if legal_mask[i] == 1 else -np.inf for i in range(len(act_values))]
+        act_values = np.where(legal_mask, act_values, -np.inf)
         return act_values
 
     def remember(self, state, action, reward, next_state, done):
+        state = np.reshape(state, [1, self.state_size])
+        next_state = np.reshape(next_state, [1, self.state_size])
         self.memory.append((state, action, reward, next_state, done))
 
     def replay(self):
-        minibatch = np.random.choice(len(self.memory), len(self.memory)//2, replace=False)
-        for i in minibatch:
+        minibatch = np.random.choice(len(self.memory), len(self.memory), replace=False)
+        for i in minibatch: 
             state, action, reward, next_state, done = self.memory[i]
             target = self.model.predict(state, verbose=0)
             if done:
