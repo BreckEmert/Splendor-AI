@@ -79,9 +79,9 @@ class Board:
         }
         
     def to_vector(self):
-        state_vector = list(self.gems.values())
+        state_vector = list(self.gems.values()) # length 6
 
-        for tier in ['tier1', 'tier2', 'tier3']:
+        for tier in ['tier1', 'tier2', 'tier3']: # length 11*3
             tier_vector = []
             for card in self.cards[tier]:
                 tier_vector.extend(card.vector)
@@ -89,12 +89,12 @@ class Board:
             state_vector.extend(tier_vector)
             
         nobles_vector = []
-        for card in self.cards['nobles']:
+        for card in self.cards['nobles']: # length 6*3
             nobles_vector += [card.points] + list(card.cost.values())
         nobles_vector += [0] * (6 * (3 - len(self.cards['nobles'])))
         state_vector.extend(nobles_vector)
 
-        return state_vector
+        return state_vector # length 57
 
 
 if __name__ == "__main__":

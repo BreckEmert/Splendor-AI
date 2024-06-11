@@ -105,8 +105,8 @@ class Game:
         }
 
     def to_vector(self):
-        state_vector = self.board.to_vector()
-        for player in self.players:
+        state_vector = self.board.to_vector() # length 57
+        for player in self.players: # length 45*2 = 90
             state_vector.extend(player.to_vector())
-        state_vector.append(int(self.is_final_turn))
-        return state_vector
+        state_vector.append(int(self.is_final_turn)) # length 1
+        return state_vector # length 148

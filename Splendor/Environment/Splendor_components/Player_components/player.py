@@ -11,7 +11,8 @@ class Player:
     def __init__(self, name, strategy, strategy_strength, layer_sizes, model_path=None):
         self.name: str = name
         self.gems: dict = {'white': 0, 'blue': 0, 'green': 0, 'red': 0, 'black': 0, 'gold': 0}
-        self.gem_mapping = {'white': 0, 'blue': 1, 'green': 2, 'red': 3, 'black': 4, 'gold': 5}
+        self.gem_to_index = {'white': 0, 'blue': 1, 'green': 2, 'red': 3, 'black': 4, 'gold': 5}
+        self.index_to_gem = {0: 'white', 1: 'blue', 2: 'green', 3: 'red', 4: 'black', 5: 'gold'}
         self.cards: dict = {'white': 0, 'blue': 0, 'green': 0, 'red': 0, 'black': 0}
         self.reserved_cards: list = []
         self.points: int = 0
@@ -33,11 +34,10 @@ class Player:
         self.points += card.points
         self.cards_state[card.gem][card.tier].append(card.id)
 
-    def take_tokens_loop(self, game_state, board):
-        board_gems = {gem: amount for gem, amount in board.gems.items() if gem != 'gold' and amount > 0}
+    def take_tokens_loop(self, game_state):
         self_gems = {gem: amount for gem, amount in self.gems.items() if gem != 'gold' and amount > 0}
         total_gems = sum(self_gems.values())
-        chosen_move = defaultdict(int) # 'white': 0, 'blue': 0, 'green': 0, 'red': 0, 'black': 0
+        chosen_move = [0] * 6
 
         takes_remaining = 3
         required_discards = max(0, total_gems + sum(chosen_move.values()) - 10)
@@ -47,29 +47,24 @@ class Player:
             # Discard a gem to help with the logic
             if total_gems == 10 and takes_remaining % 2:
                 for i, count, in enumerate(self_gems):
-                    legal_mask[i+10] == 1
+                    if count > 0:
+                        legal_mask[i+10] == 1
                 rl_moves = self.rl_model.get_predictions(game_state, legal_mask)
                 move_index = np.argmax(rl_moves)
                 self.local_memory.append(game_state, move_index)
 
-                chosen_move[move_index-60] -= 1
-                board_gems[] += 1
-                self_gems[] -= 1
                 required_discards -= 1
-                game_state[i+some_index] == something
+                game_state[move_index] += 1 # Update board
+                game_state[move_index] -= 1 # Update player
+                chosen_move[move_index] -= 1 # Update for apply_move()?
 
             # Take a gem
-            for i, count, in enumerate(board_gems.values()):
-                if count:
-                    game_state[i+some_index] == count
-                    takes_remaining -= 1
-
             rl_moves = self.rl_model.get_predictions(game_state, legal_mask)
             move_index = np.argmax(rl_moves)
             self.local_memory.append((game_state, move_index))
 
             chosen_move[move_index-10] += 1
-            game_state[i+some_index] == count # Calling this at the end in case we still need it (instead of at beginning)
+            game_state[move_index] += 1 # Calling this at the end in case we still need it (instead of at beginning)
         
         while required_discards:
             for i, count, in enumerate(self_gems): # Using cards because it doesn't have gold
@@ -81,7 +76,7 @@ class Player:
             self.local_memory.append(game_state, move_index)
 
             chosen_move[move_index-60] -= 1
-            game_state[i+some_index] == count # Calling this at the end in case we still need it (instead of at beginning)
+            game_state[move_index] -= 1 # Calling this at the end in case we still need it (instead of at beginning)
 
         return chosen_move
 
@@ -92,27 +87,27 @@ class Player:
         legal_mask = [0] * 61 # Action vector size
         remaining_cost = sum(cost.values())
         while remaining_cost:
-            for i, gem in enumerate(cost.values()): # gem is not cost.values but which did i mean
-                legal_mask[i+10] = 1
-                if self.gems['gold'] >= remaining_cost:
-                    legal_mask[60] = 1
+            # Enable spending gold as a legal move
+            for index, cost in enumerate(cost.values()): # gem is not cost.values but which did i mean
+                if self.gems[self.index_to_gem(index)] > cost:
+                    legal_mask[index+10] = 1
+                if self.gems['gold'] >= cost:
+                    legal_mask[60] = 1 # is this discarding or taking gold though need to make sure we don't need 2
 
-                rl_moves = self.rl_model.get_predictions(game_state, legal_mask)
-                move_index = np.argmax(rl_moves)
-                if move_index == 60:
-                    self.gems['gold'] -= remaining_cost
-                    remaining_cost = 0
-                    self.local_memory.append() # Don't we just repeat this move?  But only if it's predicting using two gold pieces
-                else:
-                    self.local_memory.append(game_state, move_index)
+            rl_moves = self.rl_model.get_predictions(game_state, legal_mask)
+            move_index = np.argmax(rl_moves)
+            self.local_memory.append(game_state, move_index)
 
-                chosen_move[move_index] -= 1 # Need to make sure all these negatives/positives work correctly with change_gems
+            chosen_move[move_index] -= 1 # Need to make sure all these negatives/positives work correctly with change_gems
 
-                cost[move_index] -= 1
-                # Predict gems to discard and have a discard gold move which can only be called once legal to purchase with only gold from there on out.  Then just subtract remaining cost with gold
-                    
-                game_state[i+some_index] += 1 # Calling this at the end in case we still need it (instead of at beginning)
-                game_state[i+some_other_index] -= 1 # Buying also returns the gem
+            cost[move_index] -= 1
+            # Predict gems to discard and have a discard gold move which can only be called once legal to purchase with only gold from there on out.  Then just subtract remaining cost with gold
+            
+            # Calling this at the end in case we still need it (instead of at beginning)
+            if move_index == 60:
+                i = 6
+            game_state[i] += 1 # Board gains the gem
+            game_state[i+some_other_index] -= 1 # Player spends the gem
 
             return chosen_move
 
@@ -197,9 +192,9 @@ class Player:
                 case 'take':
                     gem, amount = details # Overriding tier and position
                     if amount == 1:
-                        moves_vector[self.gem_mapping[gem]] = 1
+                        moves_vector[self.gem_to_index[gem]] = 1
                     elif amount == 2:
-                        moves_vector[self.gem_mapping[gem]*2] = 1
+                        moves_vector[self.gem_to_index[gem]*2] = 1
                     elif amount == -1:
                         pass # Discards are only handled by take_tokens_loop
                 case 'buy' | 'buy_reserved':
@@ -217,11 +212,11 @@ class Player:
 
         if move_index < 15:  # Take (includes discarding a gem)
             if move_index < 5:
-                move = ('take', (self.gem_mapping[move_index], 1))
+                move = ('take', (self.index_to_gem[move_index], 1))
             elif move_index < 10:
-                move = ('take', (self.gem_mapping[move_index], 2))
+                move = ('take', (self.index_to_gem[move_index], 2))
             else:
-                move = ('take', (self.gem_mapping[move_index], -1))
+                move = ('take', (self.index_to_gem[move_index], -1))
 
         elif move_index < 45: # Buy
             if move_index < 27:
@@ -273,11 +268,14 @@ class Player:
         for card in self.reserved_cards:
             reserved_cards_vector.extend(card.vector)
         reserved_cards_vector += [0] * (11 * (3-len(self.reserved_cards)))
+
         return (
-            list(self.gems.values()) + 
-            list(self.cards.values()) + 
-            reserved_cards_vector + 
-            [self.points])
+            list(self.gems.values()) + # length 6
+            list(self.cards.values()) + # length 5
+            reserved_cards_vector + # length 11*3 = 33
+            [self.points] # length 1
+        ) # length 45
+    
 
 if __name__ == "__main__":
     import sys

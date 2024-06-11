@@ -35,7 +35,6 @@ def train_agent(base_save_path, log_path, layer_sizes, model_paths=None):
 
         while not game.victor:
             game.turn()  # Take a turn
-            # IF WERE CALLING TURN() WHICH DOES THE PLAYER STUFF, ITS MEMORY NEEDS TO BE PUT ON AFTER WE CALL REGULAR REMEMBER() NOT BEFORE
             next_state = np.array(game.to_vector())
             next_state = np.reshape(next_state, [1, state_size])
 
@@ -52,7 +51,7 @@ def train_agent(base_save_path, log_path, layer_sizes, model_paths=None):
                 next_state, 
                 1 if game.victor else 0
             )
-            if active_player.local_memory:
+            if active_player.local_memory: # THIS CAN PROBABLY JUST BE APPENDED ONTO MEMORY LIVE AND TREATED AS NORMAL MEMORY
                 for game_state, move_index in active_player.local_memory:
                     active_player.rl_model.remember(
                         game_state, 
@@ -60,7 +59,8 @@ def train_agent(base_save_path, log_path, layer_sizes, model_paths=None):
                         0, 
                         next_state, # NEED A NEXT STATE
                         0
-                    )
+                    ) # Do we need other training?  This isn't incorporated into the final rewards.  We would have to append onto a global_memory
+                    # Also, do we even need local_memory or couldn't we just extend the regular memory?  In fact, why did I even do that?
                 active_player.local_memory = []
 
             # Update state
