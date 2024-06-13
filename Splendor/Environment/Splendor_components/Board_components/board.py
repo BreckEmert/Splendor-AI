@@ -1,5 +1,7 @@
 # Splendor/Environment/Splendor_components/Board_components/board.py
 
+import numpy as np
+
 from .deck import Deck
 
 
@@ -7,52 +9,53 @@ class Board:
     def __init__(self, num_players):
         # Gems
         gems = 7 - (5-num_players)
-        self.gems = {'white': gems, 'blue': gems, 'green': gems, 'red': gems, 'black': gems, 'gold': 5}
+        self.gems = np.array([gems, gems, gems, gems, gems, 5], dtype=int) # [white, blue, green, red, black, gold]
 
         # Decks
-        self.nobles = Deck('nobles')
-        self.tier3 = Deck('tier3')
-        self.tier2 = Deck('tier2')
-        self.tier1 = Deck('tier1')
+        self.tier1 = Deck(0)
+        self.tier2 = Deck(1)
+        self.tier3 = Deck(2)
+        self.nobles = Deck(3)
 
         self.taken_cards = 0
 
         self.deck_mapping = {
-            'tier1': self.tier1,
-            'tier2': self.tier2,
-            'tier3': self.tier3
+            0: self.tier1, 
+            1: self.tier2, 
+            2: self.tier3, 
+            3: self.nobles
         }
         
-        self.cards = {
-            'nobles': [self.nobles.draw() for _ in range(num_players+1)], 
-            'tier1': [self.tier1.draw() for _ in range(4)],
-            'tier2': [self.tier2.draw() for _ in range(4)],
-            'tier3': [self.tier3.draw() for _ in range(4)]
-        }
+        self.cards = [
+            [self.tier1.draw() for _ in range(4)],
+            [self.tier2.draw() for _ in range(4)],
+            [self.tier3.draw() for _ in range(4)], 
+            [self.nobles.draw() for _ in range(num_players+1)]
+        ]
     
     def get_card_by_id(self, card_id):
-        for tier in ['tier1', 'tier2', 'tier3']:
-            for card in self.cards[tier]:
-                if card.id == card_id:
+        for tier in self.cards:
+            for card in tier:
+                if card and card.id == card_id:
                     return card
                 
-    def change_gems(self, gems_to_change):
-        for gem, amount in gems_to_change.items():
-            self.gems[gem] += amount
+    def take_or_return_gems(self, gems_to_change):
+        self.gems -= np.pad(gems_to_change, (0, 6-len(gems_to_change)))
 
     def take_card(self, tier, position):
         card = self.cards[tier][position]
-        self.cards[tier].remove(position)
         new_card = self.deck_mapping[tier].draw()
         if new_card:
             self.cards[tier][position] = new_card
+        else:
+            self.cards[tier][position] = None # Placeholder
         return card
     
     def reserve(self, tier, position):
         # Give gold if available
         gold = 0
-        if self.gems['gold']:
-            self.gems['gold'] -= 1
+        if self.gems[5]:
+            self.gems[5] -= 1
             gold = 1
 
         # Replace card
@@ -62,8 +65,8 @@ class Board:
     def reserve_from_deck(self, tier):
         # Give gold if available
         gold = 0
-        if self.gems['gold']:
-            self.gems['gold'] -= 1
+        if self.gems[5]:
+            self.gems[5] -= 1
             gold = 1
 
         # Remove card
@@ -71,37 +74,29 @@ class Board:
     
     def get_state(self):
         return {
-            'gems': self.gems, 
-            'cards': {
-                tier: [card.id for card in cards]
-                for tier, cards in self.cards.items()
-            }
+            'gems': self.gems.tolist(), 
+            'cards': [[card.id if card is not None else None for card in tier] for tier in self.cards]
         }
         
     def to_vector(self):
-        state_vector = list(self.gems.values()) # length 6
+        state_vector = self.gems.copy() # length 6
 
-        for tier in ['tier1', 'tier2', 'tier3']: # length 11*3
-            tier_vector = []
-            for card in self.cards[tier]:
-                tier_vector.extend(card.vector)
-            tier_vector += [0] * (11 * (4 - len(self.cards[tier])))
-            state_vector.extend(tier_vector)
+        tier_vector = []
+        for tier in self.cards[:3]: # length 11*3
+            for card in tier:
+                if card:
+                    tier_vector.extend(card.vector)
+                else:
+                    tier_vector.extend([0] * 11)
             
         nobles_vector = []
-        for card in self.cards['nobles']: # length 6*3
-            nobles_vector += [card.points] + list(card.cost.values())
-        nobles_vector += [0] * (6 * (3 - len(self.cards['nobles'])))
-        state_vector.extend(nobles_vector)
+        for card in self.cards[3]: # length 6*3
+            if card:
+                nobles_vector.extend(card.vector[5:]) # Don't need the gem reward
+            else:
+                nobles_vector.extend([0] * 6)
 
-        return state_vector # length 57
+        state_vector = np.concatenate((self.gems, tier_vector, nobles_vector))
 
-
-if __name__ == "__main__":
-    import sys
-
-    sys.path.append("C:/Users/Public/Documents/Python_Files/Splendor")
-
-    from Environment.Splendor_components.Board_components.deck import Deck # type: ignore
-
-    b1 = Board(2)
+        assert len(state_vector) == 156, f"Board state vector is not 156, but {len(state_vector)}"
+        return state_vector # length 156

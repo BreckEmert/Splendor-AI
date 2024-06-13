@@ -4,28 +4,29 @@ import json
 import numpy as np
 import os
 
-from Environment.Splendor_components.Player_components.strategy import ( # type: ignore
+from Environment.Splendor_components.Player_components.strategy import (
     BestStrategy, RandomStrategy, OffensiveStrategy, ResourceHog, ObliviousStrategy
 )
+from RL import RLAgent
 
 
 def train_agent(base_save_path, log_path, layer_sizes, model_paths=None):
-    from Environment.game import Game # type: ignore
+    from Environment.game import Game
     
     # Players and strategies (BestStrategy for training perfectly)
-    players = [
-        ('Player1', BestStrategy(), 1, layer_sizes, model_paths[0] if model_paths else None),
-        ('Player2', BestStrategy(), 1, layer_sizes, model_paths[1] if model_paths else None)
-    ]
+    player1_model = RLAgent(layer_sizes, model_paths[0])
+    player2_model = RLAgent(layer_sizes, model_paths[1])
     
-    state_size = 247  # ADJUST LATER
+    players = [
+        ('Player1', BestStrategy(), 1, player1_model, 0),
+        ('Player2', BestStrategy(), 1, player2_model, 1)
+    ]
 
     # Training loop
-    for episode in range(1):  # Number of games
+    for episode in range(10):  # Number of games
         logging = False
         game = Game(players)
         state = np.array(game.to_vector())
-        state = np.reshape(state, [1, state_size])
 
         # Log every 10 games
         if episode % 10 == 0:
@@ -36,7 +37,6 @@ def train_agent(base_save_path, log_path, layer_sizes, model_paths=None):
         while not game.victor:
             game.turn()  # Take a turn
             next_state = np.array(game.to_vector())
-            next_state = np.reshape(next_state, [1, state_size])
 
             if logging:
                 json.dump(game.get_state(), log)
@@ -44,24 +44,15 @@ def train_agent(base_save_path, log_path, layer_sizes, model_paths=None):
 
             # Agent remembers
             active_player = game.active_player
-            active_player.rl_model.remember(
-                state, 
-                active_player.move_index, 
-                game.reward, 
-                next_state, 
-                1 if game.victor else 0
-            )
-            if active_player.local_memory: # THIS CAN PROBABLY JUST BE APPENDED ONTO MEMORY LIVE AND TREATED AS NORMAL MEMORY
-                for game_state, move_index in active_player.local_memory:
-                    active_player.rl_model.remember(
-                        game_state, 
-                        move_index, 
-                        0, 
-                        next_state, # NEED A NEXT STATE
-                        0
-                    ) # Do we need other training?  This isn't incorporated into the final rewards.  We would have to append onto a global_memory
-                    # Also, do we even need local_memory or couldn't we just extend the regular memory?  In fact, why did I even do that?
-                active_player.local_memory = []
+            if not active_player.entered_loop:
+                active_player.rl_model.remember(
+                    state, 
+                    active_player.move_index, 
+                    game.reward, 
+                    next_state, 
+                    1 if game.victor else 0
+                )
+            active_player.entered_loop = False
 
             # Update state
             state = next_state
