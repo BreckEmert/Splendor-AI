@@ -1,83 +1,127 @@
 # Splendor/RL/training.py
 
-import json
 import numpy as np
 import os
 
-from Environment.Splendor_components.Player_components.strategy import (
+from Environment.Splendor_components.Player_components.strategy import ( # type: ignore
     BestStrategy, RandomStrategy, OffensiveStrategy, ResourceHog, ObliviousStrategy
 )
-from RL import RLAgent
+from Environment.game import Game # type: ignore
+from RL import RLAgent # type: ignore
 
 
-def train_agent(base_save_path, log_path, layer_sizes, model_paths=None):
-    from Environment.game import Game
-    
-    # Players and strategies (BestStrategy for training perfectly)
-    player1_model = RLAgent(layer_sizes, model_paths[0])
-    player2_model = RLAgent(layer_sizes, model_paths[1])
+def debug_game(base_save_path, log_path, layer_sizes, model_path):
+     # Players and strategies (BestStrategy for training perfectly)
+    player1_model = RLAgent(layer_sizes, model_path)
+    player2_model = RLAgent(layer_sizes, model_path)
     
     players = [
         ('Player1', BestStrategy(), 1, player1_model, 0),
         ('Player2', BestStrategy(), 1, player2_model, 1)
     ]
 
-    # Training loop
-    for episode in range(5):  # Number of games
-        logging = False
-        game = Game(players)
-        state = np.array(game.to_vector())
+    for episode in range(1000):
+        # Enable logging for all games
+        log_state = open(os.path.join(log_path, f"game_states_episode_{episode}.json"), 'w')
+        log_move = open(os.path.join(log_path, f"moves_episode_{episode}.json"), 'w')
 
-        # Log every 10 games
-        if episode % 10 == 0:
-            log_state = open(os.path.join(log_path, f"game_states_episode_{episode}.json"), 'w')
-            log_move = open(os.path.join(log_path, f"moves_episode_{episode}.json"), 'w')
-            logging = True
+        simulate_game(players, True, log_state, log_move)
+        # game = simulate_game(players, False, None, None)
+        # print(f"Simulated game {episode}")
 
-        while not game.victor:
-            game.turn()  # Take a turn
-            next_state = np.array(game.to_vector())
+def simulate_game(players):
+    game = Game(players)
 
-            if logging:
-                json.dump(game.get_state(), log_state)
-                log_state.write('\n')
-                log_move.write(str(game.active_player.chosen_move) + '\n')
+    while not game.victor and game.half_turns < 350:
+        game.turn()
+    
+    return game
 
-            # Agent remembers
-            active_player = game.active_player
-            if not active_player.entered_loop:
-                active_player.rl_model.remember(
-                    state, 
-                    active_player.move_index, 
-                    game.reward, 
-                    next_state, 
-                    1 if game.victor else 0
-                )
-            active_player.entered_loop = False
+def priority_play(layer_sizes, model_path):
+    """searches tons of games and selects the fastest 10% for training"""
+    # Players and strategies (BestStrategy for training perfectly)
+    player1_model = RLAgent(layer_sizes, model_path)
+    player2_model = RLAgent(layer_sizes, model_path)
+    
+    players = [
+        ('Player1', BestStrategy(), 1, player1_model),
+        ('Player2', BestStrategy(), 1, player2_model)
+    ]
 
-            # Update state
-            state = next_state
+    num_wins = 1
+    max_states = 400
+    target_percentage = 0.1
+
+    action_size = player1_model.action_size
+    state_size = player1_model.state_size
+    batch_size = 128
+    
+    while True:
+        # Set player2 to be the most updated player 1 model
+        player2_model.model.set_weights(player1_model.model.get_weights())
+
+        # Preallocate space to avoid padding
+        final_states = np.empty((num_wins, max_states, state_size), dtype=int) # Will need to be floats when we do calculations
+        final_actions = np.zeros((num_wins, max_states, action_size), dtype=int)
+
+        final_masks = np.zeros((num_wins, max_states), dtype=bool)
+        final_lengths = np.empty((num_wins, ), dtype=int)
         
-        print(f"Episode {episode+1} game complete and took {game.half_turns} turns. Replaying.")
-        # Final rewards
-        for player in game.players:
-            player.rl_model.replay()
-            final_reward = 5 if player == game.victor else -5
-            for state, action, reward, next_state, done in reversed(player.rl_model.memory):
-                player.rl_model.train(state, action, final_reward, next_state, done)
+        i, current_wins = 0, 0
+        while current_wins < num_wins:
+            game = Game(players)
+            game.turn() # So that active_player exists
+            while not game.victor and game.active_player.rl_model.num_predicts < max_states-6: # Single turn makes up to 6 predictions
+                game.turn()
 
-            # Decay epsilon
-            if player.rl_model.epsilon > player.rl_model.epsilon_min:
-                player.rl_model.epsilon *= player.rl_model.epsilon_decay
+            for player in game.players:
+                if player.victor:
+                    print("won")
+                    num_moves = len(player.rl_model.action_memory)
+
+                    # Place game into preallocated arrays
+                    final_states[current_wins][ :num_moves] = player.rl_model.state_memory
+                    final_actions[current_wins][np.arange(num_moves), player.rl_model.action_memory] = 1
+
+                    final_masks[current_wins][ :num_moves] = True
+                    final_lengths[current_wins] = player.rl_model.num_predicts
+                    
+                    current_wins += 1
+
+                # Reset the game
+                player.rl_model.state_memory = np.empty((0, state_size), dtype=float)
+                player.rl_model.action_memory = np.empty((0, ), dtype=int)
+                player.rl_model.num_predicts = 0
+
+            i += 1
         
-        # Close logs
-        if logging:
-            log_state.close()
-            log_move.close()
+        # Update the rolling average target
+        if current_wins/i > target_percentage:
+            max_states = int(max_states * 0.98)
+        print("Percentage of games won:", round(current_wins/i, 2), "max_states:", max_states)
 
-        # Log the progress
-        print(f"Episode {episode+1} replayed")
+        # Flatten the arrays to match the model input
+        final_states = final_states.reshape(-1, state_size)
+        final_actions = final_actions.reshape(-1, action_size)
+        final_masks = final_masks.reshape(-1)
 
-    # Save models
-    for player in game.players:
-        player.rl_model.save_model(base_save_path, player.name)
+        # Shuffle the data
+        indices = np.arange(final_states.shape[0])
+        np.random.shuffle(indices)
+        final_states = final_states[indices]
+        final_actions = final_actions[indices]
+        final_masks = final_masks[indices]
+
+        # Train on memories in batches
+        num_samples = final_states.shape[0]
+        print("num_samples:", num_samples)
+        for start in range(0, num_samples, batch_size):
+            end = min(start + batch_size, num_samples)
+            batch_states = final_states[start:end]
+            batch_actions = final_actions[start:end]
+            batch_masks = final_masks[start:end]
+
+            player1_model.train_batch(batch_states, batch_actions, batch_masks)
+
+        # Save model
+        player1_model.save_model(model_path)

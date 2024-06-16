@@ -10,7 +10,7 @@ class Card:
         self.id: int = id
         self.tier: int = tier
         self.gem: int = gem
-        self.points: int = points
+        self.points: float = points
         self.cost: np.ndarray = np.array(cost, dtype=int)  # List of gem costs
         self.vector: np.ndarray = self.to_vector()  # Vector representation
 
@@ -21,7 +21,7 @@ class Card:
     
     def to_vector(self):
         gem_one_hot = self.gem_to_one_hot(self.gem)
-        return np.concatenate((gem_one_hot, [self.points], self.cost))
+        return np.concatenate((gem_one_hot, [self.points/15], self.cost))
 
     
 class Deck:
@@ -33,11 +33,11 @@ class Deck:
         path = 'C:/Users/Public/Documents/Python_Files/Splendor/Environment/Splendor_components/Board_components/Splendor_cards_numeric.xlsx'
         deck = pd.read_excel(path, sheet_name=self.tier)
 
-        cards = []
-        for _, row in deck.iterrows():
-            id, gem, points, white, blue, green, red, black = row
-            cost = [white, blue, green, red, black]
-            cards.append(Card(id=id, tier=self.tier, gem=gem, points=points, cost=cost))
+        cards = [
+            Card(id=row[0], tier=self.tier, gem=row[1], points=row[2], 
+                 cost=[row[3], row[4], row[5], row[6], row[7]])
+            for row in deck.itertuples(index=False)
+        ]
             
         random.shuffle(cards)
         
@@ -45,11 +45,3 @@ class Deck:
 
     def draw(self):
         return self.cards.pop() if self.cards else None
-    
-
-if __name__ == "__main__":
-    import sys
-
-    sys.path.append("C:/Users/Public/Documents/Python_Files/Splendor")
-
-    tier1 = Deck(0)

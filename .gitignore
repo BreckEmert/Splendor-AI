@@ -5,7 +5,6 @@
 /Splendor/meta
 /Splendor/RL/trained_agents
 /Splendor/meta
-Splendor/states.csv
-Splendor/next_states.csv
-*.pkl
 Splendor/To-Do list.txt
+/Splendor/RL/RL/trained_agents
+Splendor/TRAIN MODEL TO PLAY WITHOUT ANY ACT.txt

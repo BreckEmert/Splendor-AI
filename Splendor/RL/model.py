@@ -2,20 +2,21 @@
 
 import numpy as np
 import os
-from collections import deque
+import tensorflow as tf
 from keras.models import load_model
 
 
 class RLAgent:
     def __init__(self, layer_sizes, model_path=None):
-        self.state_size = 247 # Size of state vector
+        self.state_size = 240 # Size of state vector
         self.action_size = 61 # Maximum number of actions 
-        self.memory = deque(maxlen=500)
-        self.gamma = 0.95  # discount rate
-        self.epsilon = 0.5  # exploration rate
-        self.epsilon_min = 0.01
-        self.epsilon_decay = 0.95
-        self.learning_rate = 0.0001
+
+        self.state_memory = np.empty((0, self.state_size), dtype=float)
+        self.action_memory = np.empty((0, ), dtype=int)
+        self.num_predicts = 0
+
+        self.epsilon = 0.8  # exploration rate
+        self.learning_rate = 0.00005
 
         self.layer_sizes = layer_sizes
         if model_path:
@@ -30,56 +31,60 @@ class RLAgent:
         from keras.optimizers import Adam
 
         model = Sequential()
-        model.add(Dense(self.layer_sizes[0], input_dim=self.state_size, activation='relu'))
+        model.add(Dense(self.layer_sizes[0], input_dim=self.state_size, activation='selu'))
         for size in self.layer_sizes[1:]:
-            model.add(Dense(size, activation='relu'))
-        model.add(Dense(self.action_size, activation='linear'))
-        model.compile(loss='mse', optimizer=Adam(learning_rate=self.learning_rate))
+            model.add(Dense(size, activation='selu'))
+        model.add(Dense(self.action_size, activation='softmax'))
+        model.compile(loss='categorical_crossentropy', optimizer=Adam(learning_rate=self.learning_rate))
         return model
 
     def get_predictions(self, state, legal_mask):
-        state = np.reshape(state, [1, self.state_size])
+        self.num_predicts += 1 # More accurate than game.half_turns
+
         if np.random.rand() <= self.epsilon:
             act_values = np.random.rand(self.action_size)  # Exploration
         else:
+            state = np.expand_dims(state, axis=0) # Batch dimension
             act_values = self.model.predict(state, verbose=0)[0]  # All actions
+            if np.random.rand() < 0.0002:
+                print(act_values[legal_mask==1])
 
         # Illegal move filter
         act_values = np.where(legal_mask, act_values, -np.inf)
         return act_values
 
-    def remember(self, state, action, reward, next_state, done):
-        state = np.reshape(state, [1, self.state_size])
-        next_state = np.reshape(next_state, [1, self.state_size])
-        self.memory.append((state, action, reward, next_state, done))
+    def remember(self, state, action):
+        self.state_memory = np.vstack([self.state_memory, state])
+        self.action_memory = np.append(self.action_memory, action)
 
-    def replay(self):
-        minibatch = np.random.choice(len(self.memory), len(self.memory)//4, replace=False)
-        for i in minibatch:
-            state, action, reward, next_state, done = self.memory[i]
-            target = self.model.predict(state, verbose=0)
-            if done:
-                target[0][action] = reward
-            else:
-                t = self.model.predict(next_state, verbose=0)[0]
-                target[0][action] = reward + self.gamma * np.amax(t)
-            # print(f'replay fit, reward = {reward}')
-            self.model.fit(state, target, epochs=1, verbose=0)
+    def train_batch(self, states, actions, padding_mask):
+        example_index = np.random.randint(states.shape[0])
+        print("Example State:", states[example_index])
+        print("Example Action:", actions[example_index])
+        print("Example Padding Mask:", padding_mask[example_index])
+        with tf.GradientTape() as tape:
+            predictions = self.model(states, training=True)
+            
+            # Apply masks to get valid predictions and actions
+            masked_predictions = tf.boolean_mask(predictions, padding_mask)
+            masked_actions = tf.boolean_mask(actions, padding_mask)
 
-    def train(self, state, action, reward, next_state, done):
-        target_f = self.model.predict(state, verbose=0)
-        target_f[0][action] = reward
-        if not done:
-            target = reward + self.gamma * np.amax(self.model.predict(next_state, verbose=0)[0])
-            target_f[0][action] = target
-        # print(f'training fit, reward = {reward}')
-        self.model.fit(state, target_f, epochs=1, verbose=0)
+            # Calculate the categorical cross-entropy loss for the correct actions
+            loss = tf.keras.losses.categorical_crossentropy(masked_actions, masked_predictions)
 
-    def save_model(self, model_dir, player_name):
-        layer_sizes_str = '_'.join(map(str, self.layer_sizes))
-        model_path = os.path.join(model_dir, f"{player_name}_{layer_sizes_str}")
+        grads = tape.gradient(loss, self.model.trainable_variables)
+        self.model.optimizer.apply_gradients(zip(grads, self.model.trainable_variables))
+
+    def save_model(self, model_path):
+        if not model_path:
+            model_path = "C:/Users/Public/Documents/Python_Files/Splendor/RL/trained_agents/1024_512_512"
         os.makedirs(model_path, exist_ok=True)
-        self.model.save(os.path.join(model_path, 'model.keras'))
+        self.model.save(model_path)
+        print(f"Saved the model at {model_path}")
 
     def load_model(self, model_path):
         return load_model(model_path)
+    
+if __name__ == "__main__":
+    import tensorflow as tf
+    print("Num GPUs Available: ", len(tf.config.list_physical_devices('GPU')))
