@@ -13,7 +13,7 @@ class Player:
         self.reserved_cards: list = []
         self.points: int = 0
 
-        # self.card_ids = [[[], [], [], [], []], [[], [], [], [], []], [[], [], [], [], []], [[], [], [], [], []]]
+        self.card_ids = [[[], [], [], [], []], [[], [], [], [], []], [[], [], [], [], []], [[], [], [], [], []]]
         self.rl_model = rl_model
         self.entered_loop = False
         self.victor = False
@@ -28,7 +28,7 @@ class Player:
     def get_bought_card(self, card):
         self.cards[card.gem] += 1
         self.points += card.points
-        # self.card_ids[card.tier][card.gem].append(card.id)
+        self.card_ids[card.tier][card.gem].append(card.id)
 
     def choose_discard(self, game_state):
         # Set legal mask to only legal discards
@@ -267,7 +267,7 @@ class Player:
 
         state_vector = np.concatenate((
             self.gems/4, # length 6, there are actually 5 gold but 0 is all that matters
-            self.cards, # length 5
+            self.cards/4, # length 5
             reserved_cards_vector, # length 11*3 = 33
             [self.points/15] # length 1
         ))

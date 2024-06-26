@@ -21,7 +21,7 @@ class Card:
     
     def to_vector(self):
         gem_one_hot = self.gem_to_one_hot(self.gem)
-        return np.concatenate((gem_one_hot, [self.points/15], self.cost))
+        return np.concatenate((gem_one_hot, [self.points/15], self.cost/4))
 
     
 class Deck:
@@ -30,7 +30,7 @@ class Deck:
         self.cards = self.load_deck()
 
     def load_deck(self):
-        path = 'C:/Users/Public/Documents/Python_Files/Splendor/Environment/Splendor_components/Board_components/Splendor_cards_numeric.xlsx'
+        path = '/workspace/Environment/Splendor_components/Board_components/Splendor_cards_numeric.xlsx'
         deck = pd.read_excel(path, sheet_name=self.tier)
 
         cards = [

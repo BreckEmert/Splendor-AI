@@ -7,9 +7,4 @@ ENV CUDA_HOME /usr/local/cuda
 ENV TF_FORCE_GPU_ALLOW_GROWTH=true
 
 # Install Python packages
-RUN pip install --no-cache-dir numpy pandas scipy openpyxl pillow
-
-# Font for visualization
-RUN apt-get update && apt-get install -y \
-    fontconfig \
-    && fc-cache -f -v
+RUN pip install --no-cache-dir numpy pandas scipy openpyxl
