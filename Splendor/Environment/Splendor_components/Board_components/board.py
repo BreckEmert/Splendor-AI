@@ -16,8 +16,6 @@ class Board:
         self.tier3 = Deck(2)
         self.nobles = Deck(3)
 
-        self.taken_cards = 0
-
         self.deck_mapping = {
             0: self.tier1, 
             1: self.tier2, 
@@ -72,13 +70,13 @@ class Board:
         
     def to_vector(self):
         tier_vector = [ # 11*4*3
-            card.vector if card else [0] * 11
+            card.vector if card else np.zeros(11)
             for tier in self.cards[:3]
             for card in tier
         ]
         
         nobles_vector = [ # 6*3
-            card.vector[5:] if card else [0] * 6
+            card.vector[5:] if card else np.zeros(6)
             for card in self.cards[3]
         ]
 

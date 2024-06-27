@@ -1,8 +1,9 @@
 # Splendor/Environment/Splendor_components/Board_components/deck.py
 
+import random
+
 import numpy as np
 import pandas as pd
-import random
 
 
 class Card:
@@ -45,3 +46,6 @@ class Deck:
 
     def draw(self):
         return self.cards.pop() if self.cards else None
+    
+    def peek_vector(self):
+        return self.cards[-1].vector if self.cards else np.zeros(11)

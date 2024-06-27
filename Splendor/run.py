@@ -1,13 +1,11 @@
 # Splendor/run.py
 
 if __name__ == "__main__":
-    import sys
     import os
+    import sys
 
-    # Add the parent directory to the Python path
     sys.path.append(os.path.abspath(os.path.dirname(__file__)))
-
-    from RL import priority_play, debug_game # type: ignore
+    from RL import ddqn_loop, debug_game # type: ignore
     
     log_path = "/workspace/RL/trained_agents/game_logs"
     layer_sizes = [1024, 512, 512]
@@ -17,5 +15,5 @@ if __name__ == "__main__":
     model_path = os.path.join(base_dir, "RL", "trained_agents", f"{layer_sizes_str}.keras")
 
     # train_agent(base_save_path, log_path, layer_sizes, none_path)
-    # priority_play(layer_sizes, none_path)
-    debug_game(log_path, layer_sizes, None)
+    ddqn_loop(layer_sizes, None)
+    # debug_game(log_path, layer_sizes, None)

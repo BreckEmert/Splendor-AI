@@ -4,21 +4,19 @@ import numpy as np
 
 
 class Player:
-    def __init__(self, name, strategy, strategy_strength, rl_model):
+    def __init__(self, name, rl_model):
         self.name: str = name
+        self.rl_model = rl_model
         self.state_offset: int = 150
-
+    
+    def reset(self):
         self.gems: np.ndarray = np.zeros(6, dtype=int)
         self.cards: np.ndarray = np.zeros(5, dtype=int)
         self.reserved_cards: list = []
         self.points: int = 0
 
         self.card_ids = [[[], [], [], [], []], [[], [], [], [], []], [[], [], [], [], []], [[], [], [], [], []]]
-        self.rl_model = rl_model
-        self.entered_loop = False
         self.victor = False
-        #self.strategy: strategy = strategy
-        #self.strategy_strength: int = strategy_strength
     
     def take_or_spend_gems(self, gems_to_change):
         if len(gems_to_change) < 6:
@@ -39,14 +37,18 @@ class Player:
         rl_moves = self.rl_model.get_predictions(game_state, legal_mask)
         move_index = np.argmax(rl_moves)
         gem_index = move_index - 10
+        discard = np.zeros(5, dtype=int)
+        discard[gem_index] = 1
 
         # Remember
-        self.rl_model.remember(game_state, move_index)
+        next_state = game_state.copy()
+        next_state[gem_index+self.state_offset] -= 0.25
+        self.rl_model.remember(game_state, move_index, 0, next_state, False)
 
         # Update player in the game state (not board anymore)
-        game_state[gem_index + self.state_offset] -= 0.25
+        game_state = next_state.copy() # Do we need to do .copy()
 
-        return gem_index, game_state
+        return discard, game_state
 
     def take_tokens_loop(self, game_state, board_gems):
         total_gems = sum(self.gems)
@@ -58,12 +60,12 @@ class Player:
         while takes_remaining and np.any(legal_selection):
             # Discard if required
             if total_gems == 10:
-                gem_index, game_state = self.choose_discard(game_state)
+                discard, game_state = self.choose_discard(game_state)
 
                 # Implement move
                 total_gems -= 1
-                chosen_gems[gem_index] -= 1
-                legal_selection[gem_index] += 1 # Taking a second of the same gem is now legal
+                chosen_gems -= discard
+                legal_selection += discard # Taking a second of the same gem is now legal
             
             # Set legal mask to only legal takes
             legal_mask = np.zeros(61, dtype=int)
@@ -74,10 +76,12 @@ class Player:
             gem_index = np.argmax(rl_moves)
 
             # Remember
-            self.rl_model.remember(game_state, gem_index)
+            next_state = game_state.copy()
+            next_state[gem_index+self.state_offset] += 0.25
+            self.rl_model.remember(game_state, gem_index, 0, next_state, False)
 
             # Update player in the game state
-            game_state[gem_index+self.state_offset] += 0.25
+            game_state = next_state.copy()
 
             # Implement move
             total_gems += 1
@@ -102,13 +106,15 @@ class Player:
             # Predict token to spend
             rl_moves = self.rl_model.get_predictions(game_state, legal_mask)
             move_index = np.argmax(rl_moves)
-            gem_index = 5 if move_index == 60 else move_index-10
+            gem_index = move_index-10 if move_index != 60 else 5
 
             # Remember
-            self.rl_model.remember(game_state, move_index)
+            next_state = game_state.copy()
+            next_state[gem_index+self.state_offset] -= 0.25
+            self.rl_model.remember(game_state, move_index, 0, next_state, False)
 
             # Update player in game state
-            game_state[gem_index+self.state_offset] -= 0.25
+            game_state = next_state.copy()
 
             # Propagate move
             chosen_gems[gem_index] -= 1
@@ -124,7 +130,9 @@ class Player:
             for gem, amount in enumerate(board.gems[:5]):
                 if amount >= 4:
                     legal_moves.append(('take', (gem, 2)))
-        legal_moves.append(('take', (0, 1))) # Random of the 5 moves because right now it gets overriden
+        for gem, amount in enumerate(board.gems[:5]):
+            if amount:
+                legal_moves.append(('take', (gem, 1)))
 
         # Reserve card
         if len(self.reserved_cards) < 3:
@@ -207,37 +215,65 @@ class Player:
 
         if move_index < 10:  # Take (includes discarding a gem)
             gem_index = move_index % 5
-            gems_to_take = np.zeros(6, dtype=int)
 
             if move_index < 5:
-                self.entered_loop = True
-                move = ('take', (self.take_tokens_loop(game_state, board.gems), None))
+                chosen_gems = self.take_tokens_loop(game_state, board.gems) # Redundant first take rn
+                move = ('take', (chosen_gems, None))
             else:
+                # Remember
+                next_state = game_state.copy()
+                next_state[gem_index+self.state_offset] += 0.5
+                self.rl_model.remember(game_state, move_index, 0, next_state, False)
+
+                gems_to_take = np.zeros(6, dtype=int)
                 gems_to_take[gem_index] = 2
                 move = ('take', (gems_to_take, None))
 
         elif move_index < 45: # Buy
+            # Remember
+            reserved_card_index = move_index-27 if move_index<30 else move_index-42
+            if tier < 3: # Not for buying reserved
+                reward = min(board.cards[tier][card_index].points, 15-self.points) / 15
+            else:
+                reward = min(self.reserved_cards[reserved_card_index].points, 15-self.points) / 15
+
+            self.check_noble_visit(board)
+            if self.points >= 15:
+                reward += 10
+                self.rl_model.remember(game_state, move_index, reward, game_state, True)
+                return None
+
+            next_state = game_state.copy()
+            offset = 11 * (4*tier + card_index)
+            next_state[offset:offset+11] = board.deck_mapping[tier].peek_vector()
+            self.rl_model.remember(game_state, move_index, reward, next_state, False)
+            
+
             if move_index < 27:
                 move = ('buy', (tier, card_index))
             elif move_index < 30:
-                move = ('buy reserved', (None, move_index-27))
+                move = ('buy reserved', (None, reserved_card_index))
             elif move_index < 42:
                 card = board.cards[tier][card_index]
-
-                spent_gems = self.buy_with_gold_loop(game_state, move_index, card)
+                spent_gems = self.buy_with_gold_loop(next_state, move_index, card)
                 move = ('buy with gold', ((tier, card_index), spent_gems))
             else:
-                card_index = move_index - 42
-                card = self.reserved_cards[card_index]
-
-                spent_gems = self.buy_with_gold_loop(game_state, move_index, card)
+                card = self.reserved_cards[reserved_card_index]
+                spent_gems = self.buy_with_gold_loop(next_state, move_index, card)
                 move = ('buy reserved with gold', (card_index, spent_gems))
 
         else: # < 60 Reserve
             if move_index < 57:
+                offset = 11 * (4*tier + card_index)
                 move = ('reserve', (tier, card_index))
             else:
+                offset = self.state_offset + len(self.reserved_cards)*11
                 move = ('reserve top', (move_index-57, None))
+
+            # Remember
+            next_state = game_state.copy()
+            next_state[offset:offset+11] = board.deck_mapping[tier].peek_vector()
+            self.rl_model.remember(game_state, move_index, 0, next_state, False)
         
         return move
     
@@ -245,14 +281,17 @@ class Player:
         legal_moves = self.get_legal_moves(board)
         legal_mask = self.legal_to_vector(legal_moves)
         rl_moves = self.rl_model.get_predictions(game_state, legal_mask)
-        #strategic_moves = self.strategy.strategize(game_state, rl_moves, self.strategy_strength)
         
         self.move_index = np.argmax(rl_moves)
-        self.rl_model.remember(game_state, self.move_index) # Remember before entering any loops
-        self.chosen_move = self.vector_to_details(board, game_state, self.move_index)
-
-        return self.chosen_move
+        return self.vector_to_details(board, game_state, self.move_index)
     
+    def check_noble_visit(self, board):
+        for index, noble in enumerate(board.cards[3]):
+            if noble and np.all(self.cards >= noble.cost):
+                self.points += noble.points
+                board.cards[3][index] = None
+                break # No logic to tie-break, seems too insignificant for training
+
     def get_state(self):
         return {
             'gems': self.gems.tolist(), 
@@ -262,8 +301,9 @@ class Player:
         }
 
     def to_vector(self):
-        reserved_cards_vector = [vector for card in self.reserved_cards for vector in card.vector]
-        reserved_cards_vector.extend([0] * 11*(3-len(self.reserved_cards)))
+        reserved_cards_vector = np.zeros(33)
+        for i, card in enumerate(self.reserved_cards):
+            reserved_cards_vector[i*11:(i+1)*11] = card.vector
 
         state_vector = np.concatenate((
             self.gems/4, # length 6, there are actually 5 gold but 0 is all that matters
