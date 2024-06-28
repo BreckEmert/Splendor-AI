@@ -15,8 +15,8 @@ class Player:
         self.reserved_cards: list = []
         self.points: int = 0
 
-        self.card_ids = [[[], [], [], [], []], [[], [], [], [], []], [[], [], [], [], []], [[], [], [], [], []]]
-        self.victor = False
+        self.card_ids: list = [[[], [], [], [], []], [[], [], [], [], []], [[], [], [], [], []], [[], [], [], [], []]]
+        self.victor: bool = False
     
     def take_or_spend_gems(self, gems_to_change):
         if len(gems_to_change) < 6:
@@ -94,7 +94,9 @@ class Player:
     def buy_with_gold_loop(self, game_state, move_index, card):
         chosen_gems = np.zeros(6, dtype=int)
         legal_mask = np.zeros(61, dtype=int) # Action vector size
-        cost = np.append(card.cost, 0)
+        cost = card.cost - self.cards
+        cost = np.maximum(cost, 0)
+        cost = np.append(cost, 0)
 
         while sum(cost) > 0:
             gems = self.gems + chosen_gems # Update the player's gems to a local variable
@@ -123,6 +125,8 @@ class Player:
         return chosen_gems
 
     def get_legal_moves(self, board):
+        effective_gems = self.gems.copy()
+        effective_gems[:5] += self.cards
         legal_moves = []
 
         # Take gems
@@ -151,10 +155,10 @@ class Player:
                     gold_needed = 0
 
                     for gem_index, amount in enumerate(card.cost):
-                        if self.gems[gem_index] < amount:
+                        if effective_gems[gem_index] < amount:
                             can_afford = False
-                            gold_needed += amount - self.gems[gem_index]
-                            if gold_needed > self.gems[5]:
+                            gold_needed += amount - effective_gems[gem_index]
+                            if gold_needed > effective_gems[5]:
                                 can_afford_with_gold = False
                                 break
 
@@ -169,10 +173,10 @@ class Player:
             gold_needed = 0
 
             for gem_index, amount in enumerate(card.cost):
-                if self.gems[gem_index] < amount:
+                if effective_gems[gem_index] < amount:
                     can_afford = False
-                    gold_needed += amount - self.gems[gem_index]
-                    if gold_needed > self.gems[5]:
+                    gold_needed += amount - effective_gems[gem_index]
+                    if gold_needed > effective_gems[5]:
                         can_afford_with_gold = False
                         break
 
@@ -283,7 +287,8 @@ class Player:
         rl_moves = self.rl_model.get_predictions(game_state, legal_mask)
         
         self.move_index = np.argmax(rl_moves)
-        return self.vector_to_details(board, game_state, self.move_index)
+        self.chosen_move = self.vector_to_details(board, game_state, self.move_index)
+        return self.chosen_move
     
     def check_noble_visit(self, board):
         for index, noble in enumerate(board.cards[3]):

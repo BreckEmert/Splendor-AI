@@ -11,7 +11,7 @@ from keras.optimizers import Adam
 
 
 class RLAgent:
-    def __init__(self, layer_sizes, model_path=None):
+    def __init__(self, layer_sizes, model_path, tensorboard_dir):
         physical_devices = tf.config.list_physical_devices('GPU')
         print(tf.config.experimental.get_memory_growth(physical_devices[0]))
         try:
@@ -28,7 +28,7 @@ class RLAgent:
         self.batch_size = 128
 
         self.gamma = 0.99
-        self.epsilon = 1  # exploration rate
+        self.epsilon = 1.0  # exploration rate
         self.epsilon_min = 0.04
         self.epsilon_decay = 0.99
         self.lr = 0.01
@@ -43,6 +43,14 @@ class RLAgent:
             self.target_model = self._build_model()
             self.update_target_model()
 
+        self.tensorboard = tf.keras.callbacks.TensorBoard(
+            log_dir=tensorboard_dir,
+            histogram_freq=1, 
+            write_graph=True, 
+            write_images=True, 
+            update_freq='batch'
+        )
+
     def _build_model(self):
         model = Sequential()
         model.add(Dense(self.layer_sizes[0], input_dim=self.state_size, activation='relu'))
@@ -56,7 +64,7 @@ class RLAgent:
         self.target_model.set_weights(self.model.get_weights())
 
     def update_learning_rate(self, avg_game_length):
-        new_lr = max(min(avg_game_length**2.14 / 1_000_000, 0.01), 0.0001) # y=\frac{x^{2.14}}{1000000}
+        new_lr = max(min(avg_game_length**5.2 / 10_000_000_000, 0.01), 0.0001) # y=\frac{\left(x-6\right)^{5.2}}{10000000000} 10_000_000_000
         self.model.optimizer.learning_rate.assign(new_lr)
         self.lr = new_lr
 
@@ -65,7 +73,6 @@ class RLAgent:
         if np.random.rand() <= self.epsilon:
             act_values = np.random.rand(self.action_size)  # Exploration
         else:
-            state = tf.convert_to_tensor(state, dtype=tf.float32) # Batch dimension
             act_values = self.model.predict(state, verbose=0)[0]  # All actions
             # if np.random.rand() < 0.0004:
             #     print(act_values[legal_mask==1])
@@ -75,8 +82,7 @@ class RLAgent:
         return act_values
 
     def remember(self, state, action, reward, next_state, done):
-        # print(type(state), type(action), type(reward), type(next_state), type(done))
-        penalty = 0.05 # Incentivize quicker games
+        penalty = 0.01 # Incentivize quicker games
         # self.memory.append((tf.cast(state, dtype=tf.float32), action, reward-penalty, tf.cast(next_state, dtype=tf.float32), done))
         self.memory.append((state, action, reward-penalty, next_state, done))
 
@@ -100,7 +106,7 @@ class RLAgent:
                 best_next_q = tf.argmax(next_qs[i])
                 target_qs[i][actions[i]] = rewards[i] + self.gamma*next_targets[i][best_next_q]
         # Fit
-        self.model.fit(states, target_qs, epochs=1, verbose=0)
+        self.model.fit(states, target_qs, epochs=1, verbose=0, callbacks=[self.tensorboard])
 
     def replay(self):
         # Training twice for now

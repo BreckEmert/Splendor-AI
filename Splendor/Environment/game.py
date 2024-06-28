@@ -86,8 +86,6 @@ class Game:
                     self.active_player.take_or_spend_gems(-discard)
                     self.active_player.gems[5] += gold
 
-
-   
     def get_state(self):
         return {
             'board': self.board.get_state(),
