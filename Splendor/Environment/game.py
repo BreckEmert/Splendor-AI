@@ -33,60 +33,62 @@ class Game:
 
     def apply_move(self, move):
         action, (tier, card_index) = move
+        player, board = self.active_player, self.board
+
         match action:
             case 'take':
                 gems_to_take = tier
-                self.board.take_or_return_gems(gems_to_take)
-                self.active_player.take_or_spend_gems(gems_to_take)
+                board.take_or_return_gems(gems_to_take)
+                player.take_or_spend_gems(gems_to_take)
             case 'buy':
-                bought_card = self.board.take_card(tier, card_index)
-                self.active_player.get_bought_card(bought_card)
+                bought_card = board.take_card(tier, card_index)
+                player.get_bought_card(bought_card)
 
-                cost = np.maximum(bought_card.cost - self.active_player.cards, 0)
-                self.board.take_or_return_gems(-cost)
-                self.active_player.take_or_spend_gems(-cost)
+                cost = np.maximum(bought_card.cost - player.cards, 0)
+                board.take_or_return_gems(-cost)
+                player.take_or_spend_gems(-cost)
             case 'buy reserved':
-                bought_card = self.active_player.reserved_cards.pop(card_index)
-                self.active_player.get_bought_card(bought_card)
+                bought_card = player.reserved_cards.pop(card_index)
+                player.get_bought_card(bought_card)
 
-                cost = np.maximum(bought_card.cost - self.active_player.cards, 0)
-                self.board.take_or_return_gems(-cost)
-                self.active_player.take_or_spend_gems(-cost)
+                cost = np.maximum(bought_card.cost - player.cards, 0)
+                board.take_or_return_gems(-cost)
+                player.take_or_spend_gems(-cost)
             case 'buy with gold':
                 spent_gems = card_index
                 tier, card_index = tier
-                bought_card = self.board.take_card(tier, card_index)
-                self.active_player.get_bought_card(bought_card)
+                bought_card = board.take_card(tier, card_index)
+                player.get_bought_card(bought_card)
 
-                self.board.take_or_return_gems(spent_gems)
-                self.active_player.take_or_spend_gems(spent_gems)
+                board.take_or_return_gems(spent_gems)
+                player.take_or_spend_gems(spent_gems)
             case 'buy reserved with gold':
                 card_index, spent_gems = tier, card_index
-                bought_card = self.active_player.reserved_cards.pop(card_index)
-                self.active_player.get_bought_card(bought_card)
+                bought_card = player.reserved_cards.pop(card_index)
+                player.get_bought_card(bought_card)
 
-                self.board.take_or_return_gems(spent_gems)
-                self.active_player.take_or_spend_gems(spent_gems)
+                board.take_or_return_gems(spent_gems)
+                player.take_or_spend_gems(spent_gems)
             case 'reserve':
-                reserved_card, gold = self.board.reserve(tier, card_index)
-                self.active_player.reserved_cards.append(reserved_card)
+                reserved_card, gold = board.reserve(tier, card_index)
+                player.reserved_cards.append(reserved_card)
 
-                if sum(self.active_player.gems) < 10:
-                    self.active_player.gems[5] += gold
+                if sum(player.gems) < 10:
+                    player.gems[5] += gold
                 else:
-                    discard, _ = self.active_player.choose_discard(self.to_vector())
-                    self.active_player.take_or_spend_gems(-discard)
-                    self.active_player.gems[5] += gold
+                    discard, _ = player.choose_discard(self.to_vector(), player.gems, reward=-2/15)
+                    player.take_or_spend_gems(discard)
+                    player.gems[5] += gold
             case 'reserve top': # OTHER PLAYERS CAN'T ACTUALLY SEE THIS CARD
-                reserved_card, gold = self.board.reserve_from_deck(tier)
-                self.active_player.reserved_cards.append(reserved_card)
+                reserved_card, gold = board.reserve_from_deck(tier)
+                player.reserved_cards.append(reserved_card)
 
-                if sum(self.active_player.gems) < 10:
-                    self.active_player.gems[5] += gold
+                if sum(player.gems) < 10:
+                    player.gems[5] += gold
                 else:
-                    discard, _ = self.active_player.choose_discard(self.to_vector())
-                    self.active_player.take_or_spend_gems(-discard)
-                    self.active_player.gems[5] += gold
+                    discard, _ = player.choose_discard(self.to_vector(), player.gems, reward=-2/15)
+                    player.take_or_spend_gems(discard)
+                    player.gems[5] += gold
 
     def get_state(self):
         return {
@@ -100,4 +102,4 @@ class Game:
         active_player = self.active_player.to_vector() # length 45
         enemy_player = self.players[(self.half_turns+1) % 2].to_vector() # length 45
 
-        return np.concatenate((board_vector, active_player, enemy_player)).astype(np.float32)
+        return np.concatenate((board_vector, active_player, [0.0], enemy_player)).astype(np.float32)
