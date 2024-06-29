@@ -11,7 +11,7 @@ from keras.optimizers import Adam
 
 
 class RLAgent:
-    def __init__(self, layer_sizes, model_path, tensorboard_dir):
+    def __init__(self, model_path=None, layer_sizes=None, memory_path=None, tensorboard_dir=None):
         physical_devices = tf.config.list_physical_devices('GPU')
         print(tf.config.experimental.get_memory_growth(physical_devices[0]))
         try:
@@ -24,49 +24,59 @@ class RLAgent:
         self.state_size = 240 # Size of state vector
         self.action_size = 61 # Maximum number of actions 
 
-        self.memory = deque(maxlen=10_000)
+        self.memory = self.load_memories(memory_path) if memory_path else deque(maxlen=10_000)
+        self.game_length = 0
         self.batch_size = 128
 
         self.gamma = 0.99
         self.epsilon = 1.0  # exploration rate
         self.epsilon_min = 0.04
         self.epsilon_decay = 0.99
-        self.lr = 0.01
+        self.lr = 0.001
 
-        self.layer_sizes = layer_sizes
         if model_path:
             self.model = load_model(model_path)
             self.target_model = load_model(model_path)
         else:
             print("Building a new model")
-            self.model = self._build_model()
-            self.target_model = self._build_model()
+            self.model = self._build_model(layer_sizes)
+            self.target_model = self._build_model(layer_sizes)
             self.update_target_model()
 
-        self.tensorboard = tf.keras.callbacks.TensorBoard(
-            log_dir=tensorboard_dir,
-            histogram_freq=1, 
-            write_graph=True, 
-            write_images=True, 
-            update_freq='batch'
-        )
+        if tensorboard_dir:
+            self.tensorboard = tf.summary.create_file_writer(tensorboard_dir)
+            self.step = 0 # For tensorboard
 
-    def _build_model(self):
+    def _build_model(self, layer_sizes):
         model = Sequential()
-        model.add(Dense(self.layer_sizes[0], input_dim=self.state_size, activation='relu'))
-        for size in self.layer_sizes[1:]:
+        model.add(Dense(layer_sizes[0], input_dim=self.state_size, activation='relu'))
+        for size in layer_sizes[1:]:
             model.add(Dense(size, activation='relu'))
         model.add(Dense(self.action_size, activation='linear'))
         model.compile(loss='mse', optimizer=Adam(learning_rate=self.lr))
         return model
-        
+    
+    def load_memories(self, memory_path):
+        import pickle
+        with open(memory_path, 'rb') as f:
+            flattened_memories = pickle.load(f)
+        loaded_memories = [tuple(mem) for mem in flattened_memories]
+        return deque(loaded_memories, maxlen=10_000)
+
     def update_target_model(self):
         self.target_model.set_weights(self.model.get_weights())
 
     def update_learning_rate(self, avg_game_length):
-        new_lr = max(min(avg_game_length**5.2 / 10_000_000_000, 0.01), 0.0001) # y=\frac{\left(x-6\right)^{5.2}}{10000000000} 10_000_000_000
+        # 0.01 schedule: y=\frac{\left(x-12\right)^{3.2}}{25000000} 25_000_000
+        new_lr = max(min((avg_game_length-12)**3.6 / 1_000_000_000, 0.01), 0.0001) # y=\frac{\left(x-12\right)^{3.6}}{1000000000} 1_000_000_000
         self.model.optimizer.learning_rate.assign(new_lr)
         self.lr = new_lr
+
+    def log_weights(self):
+        with self.tensorboard.as_default():
+            for layer in self.model.layers:
+                weights = layer.get_weights()[0]
+                tf.summary.histogram(layer.name + '_weights', weights, step=self.step)
 
     def get_predictions(self, state, legal_mask):
         state = tf.reshape(state, [1, self.state_size])
@@ -82,9 +92,8 @@ class RLAgent:
         return act_values
 
     def remember(self, state, action, reward, next_state, done):
-        penalty = 0.01 # Incentivize quicker games
-        # self.memory.append((tf.cast(state, dtype=tf.float32), action, reward-penalty, tf.cast(next_state, dtype=tf.float32), done))
-        self.memory.append((state, action, reward-penalty, next_state, done))
+        self.memory.append((state, action, reward, next_state, done))
+        self.game_length += 1
 
     def _batch_train(self, batch):
         states = tf.convert_to_tensor([mem[0] for mem in batch], dtype=tf.float32)
@@ -105,8 +114,15 @@ class RLAgent:
             else:
                 best_next_q = tf.argmax(next_qs[i])
                 target_qs[i][actions[i]] = rewards[i] + self.gamma*next_targets[i][best_next_q]
+
         # Fit
-        self.model.fit(states, target_qs, epochs=1, verbose=0, callbacks=[self.tensorboard])
+        history = self.model.fit(states, target_qs, batch_size=256, epochs=1, verbose=0)
+        print("Batch loss:", history.history['loss'][0])
+
+        # Log weights
+        if self.tensorboard:
+            self.step += 1
+            self.log_weights()
 
     def replay(self):
         # Training twice for now

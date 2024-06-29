@@ -6,7 +6,7 @@ if __name__ == "__main__":
     import sys
 
     sys.path.append(os.path.abspath(os.path.dirname(__file__)))
-    from RL import ddqn_loop, debug_game # type: ignore
+    from RL import ddqn_loop, debug_game, find_fastest_game # type: ignore
     
     log_path = "/workspace/RL/trained_agents/game_logs"
     time = (datetime.now() - timedelta(hours=5)).strftime("%m%d-%H%M")
@@ -18,6 +18,11 @@ if __name__ == "__main__":
     model_path = os.path.join(base_dir, "RL", "trained_agents", f"{layer_sizes_str}.keras")
     model_path = "/workspace/RL/trained_agents/model.keras"
 
-    # train_agent(base_save_path, log_path, layer_sizes, none_path)
-    ddqn_loop(layer_sizes, None, tensorboard_dir)
-    # debug_game(log_path, layer_sizes,  None)
+    memory_path = "/workspace/RL/memories.pkl"
+
+    # ddqn_loop(model_path=None, 
+    #           layer_sizes=layer_sizes, 
+    #           memory_path=memory_path, 
+    #           tensorboard_dir=tensorboard_dir)
+    # debug_game(layer_sizes=layer_sizes, log_path=log_path)
+    find_fastest_game(model_path=None, layer_sizes=layer_sizes, memory_path=memory_path, append_to_previous=False)

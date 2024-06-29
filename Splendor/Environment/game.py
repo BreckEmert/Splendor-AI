@@ -42,14 +42,16 @@ class Game:
                 bought_card = self.board.take_card(tier, card_index)
                 self.active_player.get_bought_card(bought_card)
 
-                self.board.take_or_return_gems(-bought_card.cost)
-                self.active_player.take_or_spend_gems(-bought_card.cost)
+                cost = np.maximum(bought_card.cost - self.active_player.cards, 0)
+                self.board.take_or_return_gems(-cost)
+                self.active_player.take_or_spend_gems(-cost)
             case 'buy reserved':
                 bought_card = self.active_player.reserved_cards.pop(card_index)
                 self.active_player.get_bought_card(bought_card)
 
-                self.board.take_or_return_gems(-bought_card.cost)
-                self.active_player.take_or_spend_gems(-bought_card.cost)
+                cost = np.maximum(bought_card.cost - self.active_player.cards, 0)
+                self.board.take_or_return_gems(-cost)
+                self.active_player.take_or_spend_gems(-cost)
             case 'buy with gold':
                 spent_gems = card_index
                 tier, card_index = tier

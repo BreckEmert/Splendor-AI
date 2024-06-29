@@ -8,3 +8,6 @@
 Splendor/To-Do list.txt
 /Splendor/RL/RL/trained_agents
 Splendor/TRAIN MODEL TO PLAY WITHOUT ANY ACT.txt
+*.csv
+*.json
+*.pkl
