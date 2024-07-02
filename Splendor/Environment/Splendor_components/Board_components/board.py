@@ -32,7 +32,7 @@ class Board:
                 
     def take_or_return_gems(self, gems_to_change):
         self.gems -= np.pad(gems_to_change, (0, 6-len(gems_to_change)))
-        assert np.all(self.gems >= 0), f"Illegal board gems {self.gems}"
+        assert np.all(self.gems >= 0), f"Illegal board gems {self.gems}, {gems_to_change}"
 
     def take_card(self, tier, position):
         card = self.cards[tier][position]

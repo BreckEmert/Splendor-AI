@@ -1,33 +1,35 @@
 # Splendor/RL/model.py
 
 from collections import deque
+import os
 from random import sample
 
 import numpy as np
 import tensorflow as tf
-from keras.layers import Input, Dense
-from keras.models import load_model, Sequential
+from keras.initializers import HeNormal
+from keras.layers import Input, Dense, Concatenate, LeakyReLU
+from keras.models import load_model
 from keras.optimizers import Adam
 
 
 class RLAgent:
-    def __init__(self, model_path=None, layer_sizes=None, memories=None, tensorboard_dir=None):
+    def __init__(self, model_path=None, from_model_path=None, layer_sizes=None, memories_path=None, tensorboard_dir=None):
         self.state_size = 241 # Size of state vector
         self.action_size = 61 # Maximum number of actions 
 
-        self.memory = self.load_memories() if memories else deque(maxlen=10_000)
+        self.memory = self.load_memories(memories_path) if memories_path else deque(maxlen=50_000)
         self.game_length = 0
-        self.batch_size = 128
+        self.batch_size = 256
 
         self.gamma = 0.99 # 0.1**(1/25)
         self.epsilon = 1.0  # exploration rate
         self.epsilon_min = 0.04
-        self.epsilon_decay = 0.99
+        self.epsilon_decay = 0.993
         self.lr = 0.001
 
-        if model_path:
-            self.model = load_model(model_path)
-            self.target_model = load_model(model_path)
+        if from_model_path:
+            self.model = load_model(from_model_path)
+            self.target_model = load_model(from_model_path)
         else:
             print("Building a new model")
             self.model = self._build_model(layer_sizes)
@@ -42,25 +44,29 @@ class RLAgent:
     def _build_model(self, layer_sizes):
         state_input = Input(shape=(self.state_size, ))
 
-        categorizer1 = Dense(layer_sizes[0], activation='relu', name='categorizer1')(state_input)
-        categorizer2 = Dense(layer_sizes[1], activation='relu', name='categorizer2')(categorizer1)
-        category = Dense(3, activation='softmax', name='category')(categorizer2)
+        categorizer1 = Dense(layer_sizes[0], kernel_initializer=HeNormal(), name='categorizer1')(state_input)
+        categorizer1 = LeakyReLU(alpha=0.01)(categorizer1)
+        categorizer2 = Dense(layer_sizes[1], kernel_initializer=HeNormal(), name='categorizer2')(categorizer1)
+        categorizer2 = LeakyReLU(alpha=0.01)(categorizer2)
+        category = Dense(8, activation='softmax', kernel_initializer=HeNormal(), name='category')(categorizer2)
 
-        state_w_category = tf.keras.layers.concatenate([state_input, category])
+        state_w_category = Concatenate()([state_input, category])
 
         # Reuse via categorizer1(state_w_category)?
-        specific1 = Dense(layer_sizes[2], activation='relu', name='specific1')(state_w_category)
-        specific2 = Dense(layer_sizes[3], activation='relu', name='specific2')(specific1)
-        move = Dense(self.action_size, activation='linear', name='move')(specific2)
+        specific1 = Dense(layer_sizes[2], kernel_initializer=HeNormal(), name='specific1')(state_w_category)
+        specific1 = LeakyReLU(alpha=0.01)(specific1)
+        specific2 = Dense(layer_sizes[3], kernel_initializer=HeNormal(), name='specific2')(specific1)
+        specific2 = LeakyReLU(alpha=0.01)(specific2)
+        move = Dense(self.action_size, activation='linear', kernel_initializer=HeNormal(), name='move')(specific2)
 
         model = tf.keras.Model(inputs=state_input, outputs=move)
         model.compile(loss='mse', optimizer=Adam(learning_rate=self.lr))
         return model
     
-    def load_memories(self):
+    def load_memories(self, memories_path):
         print("Loading existing memories")
         import pickle
-        with open("/workspace/RL/memories.pkl", 'rb') as f:
+        with open(memories_path, 'rb') as f:
             flattened_memories = pickle.load(f)
         loaded_memories = [mem for mem in flattened_memories]
         return deque(loaded_memories, maxlen=10_000)
@@ -81,14 +87,14 @@ class RLAgent:
     def get_predictions(self, state, legal_mask):
         state = tf.reshape(state, [1, self.state_size])
         if np.random.rand() <= self.epsilon:
-            act_values = np.random.rand(self.action_size)  # Exploration
+            qs = np.random.rand(self.action_size)  # Exploration
         else:
-            act_values = self.model.predict(state, verbose=0)[0]  # All actions
+            qs = self.model.predict(state, verbose=0)[0]  # All actions
 
         # Illegal move filter
-        act_values = np.where(legal_mask, act_values, -np.inf) # Compatible with graph?
+        qs = np.where(legal_mask, qs, -np.inf) # Compatible with graph?
 
-        return act_values
+        return qs
 
     def remember(self, memory, legal_mask):
         self.memory.append(memory)
@@ -161,8 +167,10 @@ class RLAgent:
         batch = list(self.memory)[-game_length:]
         self._batch_train(batch)
 
-    def save_model(self, model_path):
-        if not model_path:
-            model_path = "/workspace/RL/trained_agents/model.keras"
+    def save_model(self, base_path):
+        if not os.path.exists(base_path):
+            os.makedirs(base_path)
+        
+        model_path = os.path.join(base_path, 'model.keras')
         self.model.save(model_path)
         print(f"Saved the model at {model_path}")

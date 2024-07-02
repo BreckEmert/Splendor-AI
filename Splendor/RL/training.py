@@ -2,6 +2,7 @@
 
 import json
 import os
+import pickle
 
 from Environment.game import Game # type: ignore
 from RL import RLAgent # type: ignore
@@ -62,9 +63,9 @@ def write_to_csv(memory):
         df_next_states.to_csv('next_states.csv', index=False)
         print("-------Wrote to CSV------")
 
-def ddqn_loop(model_path=None, layer_sizes=None, memories=None, log_path=None, tensorboard_dir=None):
+def ddqn_loop(model_path=None, from_model_path=None, layer_sizes=None, memories_path=None, log_path=None, tensorboard_dir=None):
     # Players and strategies (BestStrategy for training perfectly)
-    ddqn_model = RLAgent(model_path, layer_sizes, memories, tensorboard_dir)
+    ddqn_model = RLAgent(model_path, from_model_path, layer_sizes, memories_path, tensorboard_dir)
     
     players = [
         ('Player1', ddqn_model),
@@ -74,7 +75,7 @@ def ddqn_loop(model_path=None, layer_sizes=None, memories=None, log_path=None, t
     game = Game(players)
     game_lengths = []
 
-    for episode in range(500):
+    for episode in range(1501):
         game.reset()
 
         # Enable logging for all games
@@ -106,12 +107,15 @@ def ddqn_loop(model_path=None, layer_sizes=None, memories=None, log_path=None, t
 
             print(f"Episode: {episode}, Epsilon: {ddqn_model.epsilon}, Average turns for last 10 games: {avg}, lr: {ddqn_model.lr}")
             game_lengths = []
+    
+    # Save memories
+    with open("/workspace/RL/real_memories.pkl", 'wb') as f:
+        pickle.dump(list(ddqn_model.memory), f)
 
 def find_fastest_game(model_path=None, layer_sizes=None, append_to_previous=False):
-    import pickle
     fastest_memories = []
 
-    while len(fastest_memories) < 40:
+    while len(fastest_memories) < 10:
         # Players
         players = [
             ('Player1', RLAgent(model_path, layer_sizes)),
@@ -128,7 +132,7 @@ def find_fastest_game(model_path=None, layer_sizes=None, append_to_previous=Fals
 
             while not game.victor:
                 game.turn()
-            if game.half_turns < 65:
+            if game.half_turns < 67:
                 for player in game.players:
                     if player.victor:
                         fastest_memories.append(list(player.rl_model.memory.copy())[1:])
@@ -140,7 +144,7 @@ def find_fastest_game(model_path=None, layer_sizes=None, append_to_previous=Fals
     flattened_memories = [item for sublist in fastest_memories for item in sublist]
 
     # Load existing memory
-    memory_path = "/workspace/RL/memories.pkl"
+    memory_path = "/workspace/RL/random_memories.pkl"
     if append_to_previous and os.path.exists(memory_path):
         with open(memory_path, 'rb') as f:
             existing_memories = pickle.load(f)
