@@ -5,7 +5,7 @@ import os
 import pickle
 
 from Environment.game import Game # type: ignore
-from RL import RLAgent # type: ignore
+from RL import RLAgent, RandomAgent # type: ignore
 
 
 def debug_game(model_path=None, layer_sizes=None, memories=False, log_path=None):
@@ -33,8 +33,8 @@ def debug_game(model_path=None, layer_sizes=None, memories=False, log_path=None)
             # log_move.write(str(game.active_player.chosen_move) + '\n') # Disabled for ddqn
 
         # if episode == 100:
-        #     print(len(game.active_player.rl_model.memory))
-        #     write_to_csv(list(game.active_player.rl_model.memory)[-2000:])
+        #     print(len(game.active_player.model.memory))
+        #     write_to_csv(list(game.active_player.model.memory)[-2000:])
         #     break
 
         # print(f"Simulated game {episode}, game length * 2: {game.half_turns}")
@@ -78,8 +78,8 @@ def ddqn_loop(model_path=None, from_model_path=None, layer_sizes=None, memories_
     for episode in range(1501):
         game.reset()
 
-        # Enable logging for all games
-        if log_path and episode%5 == 0:
+        # Enable logging
+        if log_path: # and episode%10 == 0
             log_state = open(os.path.join(log_path, "game_states", f"states_episode_{episode}.json"), 'w')
             log_move = open(os.path.join(log_path, "moves", f"moves_episode_{episode}.json"), 'w')
             logging = True
@@ -97,12 +97,14 @@ def ddqn_loop(model_path=None, from_model_path=None, layer_sizes=None, memories_
         game_lengths.append(game.half_turns)
 
         ddqn_model.train(ddqn_model.game_length)
+        ddqn_model.lr = max(ddqn_model.lr*0.985, 0.0001) if ddqn_model.step < 51 else ddqn_model.lr
+        ddqn_model.replay()
+        ddqn_model.lr = max(ddqn_model.lr*0.985, 0.0001)
         ddqn_model.replay()
 
         if episode % 10 == 0:
             avg = sum(game_lengths)/len(game_lengths)/2
             ddqn_model.update_target_model()
-            ddqn_model.update_learning_rate(avg)
             ddqn_model.save_model(model_path)
 
             print(f"Episode: {episode}, Epsilon: {ddqn_model.epsilon}, Average turns for last 10 games: {avg}, lr: {ddqn_model.lr}")
@@ -112,34 +114,60 @@ def ddqn_loop(model_path=None, from_model_path=None, layer_sizes=None, memories_
     with open("/workspace/RL/real_memories.pkl", 'wb') as f:
         pickle.dump(list(ddqn_model.memory), f)
 
-def find_fastest_game(model_path=None, layer_sizes=None, append_to_previous=False):
+def find_fastest_game(memories_path, append_to_previous):
+    from copy import deepcopy
     fastest_memories = []
 
-    while len(fastest_memories) < 10:
+    while len(fastest_memories) < 90:
         # Players
         players = [
-            ('Player1', RLAgent(model_path, layer_sizes)),
-            ('Player2', RLAgent(model_path, layer_sizes))
+            ('Player1', RandomAgent(memories_path)),
+            ('Player2', RandomAgent(memories_path))
         ]
 
+        game = Game(players)
+
+        # Initialize a fake memory for remember() logic purposes
+        for player in game.players:
+            player.model.memory.append([None, None, None, None, None, None])
+
+        checkpoint = deepcopy(game)
+        original_checkpoint = deepcopy(game)
+        last_buy_turn = 1
+        buys_since_checkpoint = 0
+        
         found = False
         while not found:
-            game = Game(players)
-
-            # Initialize a fake memory for remember() logic purposes
-            for player in game.players:
-                player.rl_model.memory.append([None, None, None, None, None, None])
-
-            while not game.victor:
-                game.turn()
-            if game.half_turns < 67:
-                for player in game.players:
-                    if player.victor:
-                        fastest_memories.append(list(player.rl_model.memory.copy())[1:])
-                found = True
+            game.turn()
+            # print("\nTaking turn ", game.half_turns)
+            if 15 <= game.active_player.move_index < 44:
+                # print("Buying")
+                buys_since_checkpoint += 1
+                if buys_since_checkpoint == 2:
+                    if game.half_turns - last_buy_turn < 16:
+                        last_buy_turn = game.half_turns
+                        # print("Setting last_buy_turn to ", last_buy_turn)
+                        checkpoint = deepcopy(game)
+                    else:
+                        game = deepcopy(checkpoint)
+                        # print("Loading old game at turn ", game.half_turns)
+                    buys_since_checkpoint = 0
+            
+            if game.victor:
+                # print(game.half_turns)
+                if game.half_turns < 55:
+                    print(game.half_turns)
+                    for player in game.players:
+                        if player.victor:
+                            fastest_memories.append(list(player.model.memory.copy())[1:])
+                    found = True
+                else:
+                    checkpoint = deepcopy(original_checkpoint)
+                    game = deepcopy(original_checkpoint)
+                    buys_since_checkpoint = 0
+                    last_buy_turn = 1
             else:
-                for player in game.players:
-                    player.rl_model.memory.clear()
+                game.turn()
 
     flattened_memories = [item for sublist in fastest_memories for item in sublist]
 

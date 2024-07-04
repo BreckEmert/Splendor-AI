@@ -6,10 +6,12 @@ from random import sample
 
 import numpy as np
 import tensorflow as tf
-from keras.initializers import HeNormal
-from keras.layers import Input, Dense, Concatenate, LeakyReLU
+from keras.layers import Input, Dense, Concatenate, LeakyReLU, BatchNormalization
 from keras.models import load_model
+from keras.initializers import GlorotNormal, HeNormal
 from keras.optimizers import Adam
+from keras.optimizers.schedules import ExponentialDecay
+from keras.regularizers import l2
 
 
 class RLAgent:
@@ -24,8 +26,8 @@ class RLAgent:
         self.gamma = 0.99 # 0.1**(1/25)
         self.epsilon = 1.0  # exploration rate
         self.epsilon_min = 0.04
-        self.epsilon_decay = 0.993
-        self.lr = 0.001
+        self.epsilon_decay = 0.99
+        self.lr = 0.002
 
         if from_model_path:
             self.model = load_model(from_model_path)
@@ -45,22 +47,27 @@ class RLAgent:
         state_input = Input(shape=(self.state_size, ))
 
         categorizer1 = Dense(layer_sizes[0], kernel_initializer=HeNormal(), name='categorizer1')(state_input)
-        categorizer1 = LeakyReLU(alpha=0.01)(categorizer1)
-        categorizer2 = Dense(layer_sizes[1], kernel_initializer=HeNormal(), name='categorizer2')(categorizer1)
+        categorizer1 = LeakyReLU(alpha=0.03)(categorizer1)
+        categorizer1 = BatchNormalization(name='categorizerNorm1')(categorizer1)
+        categorizer2 = Dense(layer_sizes[0], kernel_initializer=HeNormal(), name='categorizer2')(categorizer1)
         categorizer2 = LeakyReLU(alpha=0.01)(categorizer2)
-        category = Dense(8, activation='softmax', kernel_initializer=HeNormal(), name='category')(categorizer2)
+        categorizer2 = BatchNormalization(name='categorizerNorm2')(categorizer2)
+        category = Dense(3, activation='tanh', kernel_initializer=GlorotNormal(), name='category')(categorizer2)
 
         state_w_category = Concatenate()([state_input, category])
 
         # Reuse via categorizer1(state_w_category)?
-        specific1 = Dense(layer_sizes[2], kernel_initializer=HeNormal(), name='specific1')(state_w_category)
-        specific1 = LeakyReLU(alpha=0.01)(specific1)
-        specific2 = Dense(layer_sizes[3], kernel_initializer=HeNormal(), name='specific2')(specific1)
+        specific1 = Dense(layer_sizes[1], kernel_initializer=HeNormal(), name='specific1')(state_w_category)
+        specific1 = LeakyReLU(alpha=0.03)(specific1)
+        specific1 = BatchNormalization(name='specificNorm1')(specific1)
+        specific2 = Dense(layer_sizes[1], kernel_initializer=HeNormal(), name='specific2')(specific1)
         specific2 = LeakyReLU(alpha=0.01)(specific2)
-        move = Dense(self.action_size, activation='linear', kernel_initializer=HeNormal(), name='move')(specific2)
+        specific2 = BatchNormalization(name='specificNorm2')(specific2)
+        move = Dense(self.action_size, activation='linear', 
+                     kernel_initializer=HeNormal(), kernel_regularizer=l2(0.01), name='move')(specific2)
 
         model = tf.keras.Model(inputs=state_input, outputs=move)
-        model.compile(loss='mse', optimizer=Adam(learning_rate=self.lr))
+        model.compile(loss='mse', optimizer=Adam(learning_rate=self.lr, clipnorm=1.0))
         return model
     
     def load_memories(self, memories_path):
@@ -74,25 +81,15 @@ class RLAgent:
     def update_target_model(self):
         self.target_model.set_weights(self.model.get_weights())
 
-    def update_learning_rate(self, avg_game_length):
-        # 0.01 schedule: y=\frac{\left(x-12\right)^{3.2}}{25000000} 25_000_000
-        new_lr = max(min((avg_game_length-12)**3.6 / 1_000_000_000, 0.01), 0.0001) # y=\frac{\left(x-12\right)^{3.6}}{1000000000} 1_000_000_000
-        self.model.optimizer.learning_rate.assign(new_lr)
-        self.lr = new_lr
-
-        if self.tensorboard:
-            with self.tensorboard.as_default():
-                tf.summary.scalar('Training Metrics/learning_rate', self.lr, step=self.step)
-
     def get_predictions(self, state, legal_mask):
-        state = tf.reshape(state, [1, self.state_size])
         if np.random.rand() <= self.epsilon:
             qs = np.random.rand(self.action_size)  # Exploration
         else:
+            state = tf.reshape(state, [1, self.state_size])
             qs = self.model.predict(state, verbose=0)[0]  # All actions
 
         # Illegal move filter
-        qs = np.where(legal_mask, qs, -np.inf) # Compatible with graph?
+        qs = np.where(legal_mask, qs, -np.inf)
 
         return qs
 
@@ -137,16 +134,17 @@ class RLAgent:
             step = self.step
             with self.tensorboard.as_default():
                 # Grouped cards
+                tf.summary.histogram('Training Metrics/action_hist', actions, step=step)
                 tf.summary.scalar('Training Metrics/batch_loss', history.history['loss'][0], step=step)
                 tf.summary.scalar('Training Metrics/avg_reward', tf.reduce_mean(rewards), step=step)
+                tf.summary.scalar('Training Metrics/learning_rate', self.lr, step=step)
                 legal_qs = tf.where(tf.math.is_finite(qs), qs, tf.zeros_like(qs))
                 tf.summary.scalar('Training Metrics/avg_q', tf.reduce_mean(legal_qs), step=step)
-                tf.summary.histogram('Training Metrics/action_hist', actions, step=step)
 
                 # Q-values over time
-                for action in range(self.action_size):
-                    average_qs = np.mean(legal_qs[:, action], axis=0)
-                    tf.summary.scalar(f"action_qs/action_{action}", average_qs, step=step)
+                # for action in range(self.action_size):
+                #     average_qs = np.mean(legal_qs[:, action], axis=0)
+                #     tf.summary.scalar(f"action_qs/action_{action}", average_qs, step=step)
                 
                 # Weights
                 for layer in self.model.layers:
