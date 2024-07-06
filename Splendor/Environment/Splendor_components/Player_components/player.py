@@ -84,7 +84,7 @@ class Player:
 
         takes = min(3, sum(board_gems))
         discards = total_gems - 7
-        discard_reward = -3/15*discards
+        discard_reward = 0.0*discards
         chosen_gems = np.zeros(5, dtype=int)
 
         # Perform the move that was initially chosen
@@ -258,7 +258,7 @@ class Player:
                 gem_index = move_index % 5
                 next_state = state.copy()
                 next_state[gem_index+self.state_offset] += 0.5
-                self.model.remember([state.copy(), move_index, -2/15, next_state.copy(), 1], legal_mask.copy())
+                self.model.remember([state.copy(), move_index, 0.0, next_state.copy(), 1], legal_mask.copy())
 
                 chosen_gems = np.zeros(6, dtype=int)
                 chosen_gems[gem_index] = 2
@@ -268,7 +268,8 @@ class Player:
         elif move_index < 45: # Buy
             # Remember
             # ~15/1.3 purchases in a game? y=\frac{2}{15}-\frac{2}{15}\cdot\frac{1.3}{15}x
-            reward = max(3/15-3/15*1.3/15*sum(self.gems), 0.0)
+            # reward = max(3/15-3/15*1.3/15*sum(self.gems), 0.0)
+            reward = 0.0
             reserved_card_index = move_index-27 if move_index<30 else move_index-42
             if tier < 3: # Buy
                 points = board.cards[tier][card_index].points
@@ -281,7 +282,7 @@ class Player:
                 reward += min(3, 15-self.points) / 15
 
             if self.points+points >= 15:
-                reward += 10
+                reward += 5
                 self.model.remember([state.copy(), move_index, reward, state.copy(), 0], legal_mask.copy())
                 self.model.memory[-1].append(legal_mask.copy())
                 self.victor = True
@@ -316,8 +317,8 @@ class Player:
             # Remember
             next_state = state.copy()
             next_state[offset:offset+11] = board.deck_mapping[tier].peek_vector()
-            reward = 0.0 if sum(self.gems) < 10 else -3/15
-            self.model.remember([state.copy(), move_index, 0, next_state.copy(), 1], legal_mask.copy())
+            reward = 0.0 if sum(self.gems) < 10 else 0.0
+            self.model.remember([state.copy(), move_index, reward, next_state.copy(), 1], legal_mask.copy())
         
         return move
     
@@ -358,4 +359,4 @@ class Player:
             [self.points/15] # length 1
         ))
 
-        return state_vector
+        return state_vector # length 45

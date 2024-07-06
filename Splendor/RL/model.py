@@ -6,7 +6,8 @@ from random import sample
 
 import numpy as np
 import tensorflow as tf
-from keras.layers import Input, Dense, Concatenate, LeakyReLU, BatchNormalization
+from keras.config import enable_unsafe_deserialization
+from keras.layers import Input, Dense, Concatenate, Lambda, LeakyReLU, BatchNormalization
 from keras.models import load_model
 from keras.initializers import GlorotNormal, HeNormal
 from keras.optimizers import Adam
@@ -16,14 +17,15 @@ from keras.regularizers import l2
 
 class RLAgent:
     def __init__(self, model_path=None, from_model_path=None, layer_sizes=None, memories_path=None, tensorboard_dir=None):
+        enable_unsafe_deserialization()
         self.state_size = 241 # Size of state vector
         self.action_size = 61 # Maximum number of actions 
 
-        self.memory = self.load_memories(memories_path) if memories_path else deque(maxlen=50_000)
+        self.memory = self.load_memories(memories_path)
         self.game_length = 0
         self.batch_size = 256
 
-        self.gamma = 0.99 # 0.1**(1/25)
+        self.gamma = 0.91 # 0.1**(1/25)
         self.epsilon = 1.0  # exploration rate
         self.epsilon_min = 0.04
         self.epsilon_decay = 0.99
@@ -46,37 +48,72 @@ class RLAgent:
     def _build_model(self, layer_sizes):
         state_input = Input(shape=(self.state_size, ))
 
+        # Split the state into players and board
+        board = Lambda(lambda x: x[:, :150], name='board')(state_input)
+        players = Lambda(lambda x: x[:, 150:], name='players')(state_input)
+
+        # Process players and then combine with the state
+        playerLayer = Dense(layer_sizes[0], kernel_initializer=HeNormal(), name='playerLayer')(players)
+        playerLayer = LeakyReLU(alpha=0.3)(playerLayer)
+        playerLayer = BatchNormalization(name='playerNorm')(playerLayer)
+        playerOut = Dense(32, activation='tanh', kernel_initializer=GlorotNormal(), name='playerOut')(playerLayer)
+
+        # Concatenate the processed part with the rest of the state
+        stateCombined = Concatenate()([board, playerOut])
+
+        # Process the entire game
+        gameLayer1 = Dense(layer_sizes[1], kernel_initializer=HeNormal(), name='gameLayer1')(stateCombined)
+        gameLayer1 = LeakyReLU(alpha=0.3)(gameLayer1)
+        gameLayer1 = BatchNormalization(name='gameNorm1')(gameLayer1)
+
+        gameLayer2 = Dense(layer_sizes[2], kernel_initializer=HeNormal(), name='gameLayer2')(gameLayer1)
+        gameLayer2 = LeakyReLU(alpha=0.3)(gameLayer2)
+        gameLayer2 = BatchNormalization(name='gameNorm2')(gameLayer2)
+
+        move = Dense(self.action_size, activation='linear', 
+                    kernel_initializer=HeNormal(), kernel_regularizer=l2(0.013), name='action')(gameLayer2)
+
+        model = tf.keras.Model(inputs=state_input, outputs=move)
+        model.compile(loss='mse', optimizer=Adam(learning_rate=self.lr, clipnorm=1.0))
+        return model
+
+    def concat_build_model(self, layer_sizes):
+        state_input = Input(shape=(self.state_size, ))
+
         categorizer1 = Dense(layer_sizes[0], kernel_initializer=HeNormal(), name='categorizer1')(state_input)
-        categorizer1 = LeakyReLU(alpha=0.03)(categorizer1)
+        categorizer1 = LeakyReLU(alpha=0.3)(categorizer1)
         categorizer1 = BatchNormalization(name='categorizerNorm1')(categorizer1)
-        categorizer2 = Dense(layer_sizes[0], kernel_initializer=HeNormal(), name='categorizer2')(categorizer1)
-        categorizer2 = LeakyReLU(alpha=0.01)(categorizer2)
-        categorizer2 = BatchNormalization(name='categorizerNorm2')(categorizer2)
-        category = Dense(3, activation='tanh', kernel_initializer=GlorotNormal(), name='category')(categorizer2)
+        # categorizer2 = Dense(layer_sizes[0], kernel_initializer=HeNormal(), name='categorizer2')(categorizer1)
+        # categorizer2 = LeakyReLU(alpha=0.01)(categorizer2)
+        # categorizer2 = BatchNormalization(name='categorizerNorm2')(categorizer2)
+        category = Dense(3, activation='tanh', kernel_initializer=GlorotNormal(), name='category')(categorizer1)
 
         state_w_category = Concatenate()([state_input, category])
 
         # Reuse via categorizer1(state_w_category)?
         specific1 = Dense(layer_sizes[1], kernel_initializer=HeNormal(), name='specific1')(state_w_category)
-        specific1 = LeakyReLU(alpha=0.03)(specific1)
+        specific1 = LeakyReLU(alpha=0.3)(specific1)
         specific1 = BatchNormalization(name='specificNorm1')(specific1)
-        specific2 = Dense(layer_sizes[1], kernel_initializer=HeNormal(), name='specific2')(specific1)
-        specific2 = LeakyReLU(alpha=0.01)(specific2)
-        specific2 = BatchNormalization(name='specificNorm2')(specific2)
+        # specific2 = Dense(layer_sizes[1], kernel_initializer=HeNormal(), name='specific2')(specific1)
+        # specific2 = LeakyReLU(alpha=0.01)(specific2)
+        # specific2 = BatchNormalization(name='specificNorm2')(specific2)
         move = Dense(self.action_size, activation='linear', 
-                     kernel_initializer=HeNormal(), kernel_regularizer=l2(0.01), name='move')(specific2)
+                     kernel_initializer=HeNormal(), kernel_regularizer=l2(0.01), name='move')(specific1)
 
         model = tf.keras.Model(inputs=state_input, outputs=move)
         model.compile(loss='mse', optimizer=Adam(learning_rate=self.lr, clipnorm=1.0))
         return model
     
     def load_memories(self, memories_path):
-        print("Loading existing memories")
-        import pickle
-        with open(memories_path, 'rb') as f:
-            flattened_memories = pickle.load(f)
-        loaded_memories = [mem for mem in flattened_memories]
-        return deque(loaded_memories, maxlen=10_000)
+        if memories_path:
+            import pickle
+            with open(memories_path, 'rb') as f:
+                flattened_memories = pickle.load(f)
+            loaded_memories = [mem for mem in flattened_memories]
+            print(f"Loading {len(loaded_memories)} memories")
+        else:
+            loaded_memories = [[0, 0, 0, 0, 0]]
+        return deque(loaded_memories, maxlen=50_000)
 
     def update_target_model(self):
         self.target_model.set_weights(self.model.get_weights())
@@ -163,6 +200,18 @@ class RLAgent:
 
     def train(self, game_length):
         batch = list(self.memory)[-game_length:]
+        total_negative = total_positive = n_negative = n_positive = 0
+        for mem in batch:
+            reward = mem[2]
+            if reward < 0:
+                total_negative += reward
+                n_negative += 1
+            elif reward > 0:
+                total_positive += reward
+                n_positive += 1
+
+        print("\nNegative Rewards:", total_negative, total_negative/n_negative)
+        print("Positive Rewards:", total_positive, total_positive/n_positive, "\n")
         self._batch_train(batch)
 
     def save_model(self, base_path):

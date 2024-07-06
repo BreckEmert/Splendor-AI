@@ -8,15 +8,15 @@ from Environment.game import Game # type: ignore
 from RL import RLAgent, RandomAgent # type: ignore
 
 
-def debug_game(model_path=None, layer_sizes=None, memories=False, log_path=None):
+def debug_game(model_path=None, layer_sizes=None, memories_path=None, log_path=None):
     import json
 
      # Players and strategies (BestStrategy for training perfectly)
     # ddqn_model = RLAgent(layer_sizes=layer_sizes)
     
     players = [
-        ('Player1', RLAgent(layer_sizes=layer_sizes, memories=memories)),
-        ('Player2', RLAgent(layer_sizes=layer_sizes, memories=memories))
+        ('Player1', RLAgent(layer_sizes=layer_sizes, memories_path=memories_path)),
+        ('Player2', RLAgent(layer_sizes=layer_sizes, memories_path=memories_path))
     ]
 
     game = Game(players)
@@ -28,6 +28,8 @@ def debug_game(model_path=None, layer_sizes=None, memories=False, log_path=None)
         game.reset()
         while not game.victor:
             game.turn()
+
+        show_game_rewards(game.players)
             # json.dump(game.get_state(), log_state)
             # log_state.write('\n')
             # log_move.write(str(game.active_player.chosen_move) + '\n') # Disabled for ddqn
@@ -75,7 +77,7 @@ def ddqn_loop(model_path=None, from_model_path=None, layer_sizes=None, memories_
     game = Game(players)
     game_lengths = []
 
-    for episode in range(1501):
+    for episode in range(100):
         game.reset()
 
         # Enable logging
@@ -97,9 +99,9 @@ def ddqn_loop(model_path=None, from_model_path=None, layer_sizes=None, memories_
         game_lengths.append(game.half_turns)
 
         ddqn_model.train(ddqn_model.game_length)
-        ddqn_model.lr = max(ddqn_model.lr*0.985, 0.0001) if ddqn_model.step < 51 else ddqn_model.lr
+        # ddqn_model.lr = max(ddqn_model.lr*0.99, 0.0001) if ddqn_model.step > 51 else ddqn_model.lr
         ddqn_model.replay()
-        ddqn_model.lr = max(ddqn_model.lr*0.985, 0.0001)
+        ddqn_model.lr = max(ddqn_model.lr*0.992, 0.0008)
         ddqn_model.replay()
 
         if episode % 10 == 0:
@@ -118,7 +120,7 @@ def find_fastest_game(memories_path, append_to_previous):
     from copy import deepcopy
     fastest_memories = []
 
-    while len(fastest_memories) < 90:
+    while len(fastest_memories) < 180:
         # Players
         players = [
             ('Player1', RandomAgent(memories_path)),
@@ -155,10 +157,15 @@ def find_fastest_game(memories_path, append_to_previous):
             
             if game.victor:
                 # print(game.half_turns)
-                if game.half_turns < 55:
+                if game.half_turns < 53:
                     print(game.half_turns)
                     for player in game.players:
                         if player.victor:
+                            pos = 0
+                            for mem in player.memories:
+                                if mem[2] > 0:
+                                    pos += 1
+                            print("pos:", pos)
                             fastest_memories.append(list(player.model.memory.copy())[1:])
                     found = True
                 else:
@@ -182,3 +189,42 @@ def find_fastest_game(memories_path, append_to_previous):
     print("Number of memories:", len(flattened_memories))
     with open(memory_path, 'wb') as f:
         pickle.dump(flattened_memories, f)
+
+def show_game_rewards(players):
+    for num, player in enumerate(players):
+        print(num)
+        total_neg = total_pos = n_neg = n_pos = 0
+        for mem in player.model.memory:
+            reward = mem[2]
+            if reward < 0:
+                total_neg += reward
+                n_neg += 1
+            elif reward > 0:
+                total_pos += reward
+                n_pos += 1
+
+        print(f"\nPlayer {num} with {player.points} points:")
+
+        if total_neg:
+            average_neg = total_neg / n_neg
+            print("Negative Rewards:", total_neg, average_neg)
+        if total_pos:
+            average_pos = total_pos / n_pos
+            print("Positive Rewards:", total_pos, average_pos, "\n")
+        else:
+            print("No positive rewards")
+        
+        if player.victor:
+            winner_points = player.points
+            winner_neg = total_neg
+            winner_pos = total_pos
+        else:
+            loser_points = player.points
+            loser_neg = total_neg
+            loser_pos = total_pos
+
+        player.model.memory.clear()
+        player.model.memory.append([0, 0, 0, 0, 0])
+        
+    assert winner_points >= loser_points, f"Loser has {loser_points} points but winner only has {winner_points}"
+    assert winner_pos > loser_pos, f"Loser has {loser_pos} rewards but winner only has {winner_pos}"
