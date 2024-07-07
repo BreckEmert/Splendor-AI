@@ -46,7 +46,7 @@ class Player:
         # Remember
         next_state = state.copy()
         next_state[gem_index+self.state_offset] -= 0.25
-        state[195] = 0.2*progress # 0.2 * (moves remaining+1), indicating progression through loop
+        state[196] = 0.2*progress # 0.2 * (moves remaining+1), indicating progression through loop
         self.model.remember([state.copy(), move_index, reward, next_state.copy(), 1], legal_mask.copy())
 
         # Update player in the game state (not board anymore)
@@ -70,7 +70,7 @@ class Player:
         # Remember
         next_state = state.copy()
         next_state[take_index+self.state_offset] += 0.25
-        state[195] = progress # 0.2 * (moves remaining+1), indicating progression through loop
+        state[196] = progress # 0.2 * (moves remaining+1), indicating progression through loop
         self.model.remember([state.copy(), take_index, reward, next_state.copy(), 1], legal_mask.copy())
 
         return take, next_state
@@ -84,7 +84,7 @@ class Player:
 
         takes = min(3, sum(board_gems))
         discards = total_gems - 7
-        discard_reward = 0.0*discards
+        discard_reward = -1/30*discards
         chosen_gems = np.zeros(5, dtype=int)
 
         # Perform the move that was initially chosen
@@ -100,14 +100,13 @@ class Player:
         # Choose necessary discards
         while discards > 0:
             discard, state = self.choose_discard(state, player_gems+chosen_gems, progress=discards, reward=discard_reward)
-            if discard_reward:
-                discard_reward = 0
+            # discard_reward = 0.0
             chosen_gems += discard
             discards -= 1
         
         # Choose necessary takes
         while takes > 0:
-            take, state = self.choose_take(state, board_gems-chosen_gems, progress=takes)
+            take, state = self.choose_take(state, board_gems-chosen_gems, progress=takes, reward=-1/30)
             chosen_gems += take
             takes -= 1
 
@@ -137,7 +136,7 @@ class Player:
             # Remember
             next_state = state.copy()
             next_state[gem_index+self.state_offset] -= 0.25
-            self.model.remember([state.copy(), move_index, 0.0, next_state.copy(), 1], legal_mask.copy())
+            self.model.remember([state.copy(), move_index, 1/30, next_state.copy(), 1], legal_mask.copy())
 
             # Update player in game state
             state = next_state.copy()
@@ -258,7 +257,7 @@ class Player:
                 gem_index = move_index % 5
                 next_state = state.copy()
                 next_state[gem_index+self.state_offset] += 0.5
-                self.model.remember([state.copy(), move_index, 0.0, next_state.copy(), 1], legal_mask.copy())
+                self.model.remember([state.copy(), move_index, -1/30, next_state.copy(), 1], legal_mask.copy())
 
                 chosen_gems = np.zeros(6, dtype=int)
                 chosen_gems[gem_index] = 2
@@ -269,20 +268,19 @@ class Player:
             # Remember
             # ~15/1.3 purchases in a game? y=\frac{2}{15}-\frac{2}{15}\cdot\frac{1.3}{15}x
             # reward = max(3/15-3/15*1.3/15*sum(self.gems), 0.0)
-            reward = 0.0
             reserved_card_index = move_index-27 if move_index<30 else move_index-42
             if tier < 3: # Buy
                 points = board.cards[tier][card_index].points
             else: # Buy reserved
                 points = self.reserved_cards[reserved_card_index].points
-            reward += min(points, 15-self.points) / 15
+            reward = min(points, 15-self.points) / 30
 
             # Check noble visit and end of game
             if self.check_noble_visit(board):
                 reward += min(3, 15-self.points) / 15
 
             if self.points+points >= 15:
-                reward += 5
+                reward += 10
                 self.model.remember([state.copy(), move_index, reward, state.copy(), 0], legal_mask.copy())
                 self.model.memory[-1].append(legal_mask.copy())
                 self.victor = True
@@ -354,9 +352,10 @@ class Player:
 
         state_vector = np.concatenate((
             self.gems/4, # length 6, there are actually 5 gold but 0 is all that matters
+            [sum(self.gems)/10], # length 1
             self.cards/4, # length 5
             reserved_cards_vector, # length 11*3 = 33
             [self.points/15] # length 1
         ))
 
-        return state_vector # length 45
+        return state_vector # length 46

@@ -8,15 +8,15 @@ from Environment.game import Game # type: ignore
 from RL import RLAgent, RandomAgent # type: ignore
 
 
-def debug_game(model_path=None, layer_sizes=None, memories_path=None, log_path=None):
+def debug_game(model_path=None, layer_sizes=None, memory_path=None, log_path=None):
     import json
 
      # Players and strategies (BestStrategy for training perfectly)
     # ddqn_model = RLAgent(layer_sizes=layer_sizes)
     
     players = [
-        ('Player1', RLAgent(layer_sizes=layer_sizes, memories_path=memories_path)),
-        ('Player2', RLAgent(layer_sizes=layer_sizes, memories_path=memories_path))
+        ('Player1', RLAgent(layer_sizes=layer_sizes, memory_path=memory_path)),
+        ('Player2', RLAgent(layer_sizes=layer_sizes, memory_path=memory_path))
     ]
 
     game = Game(players)
@@ -65,9 +65,27 @@ def write_to_csv(memory):
         df_next_states.to_csv('next_states.csv', index=False)
         print("-------Wrote to CSV------")
 
-def ddqn_loop(model_path=None, from_model_path=None, layer_sizes=None, memories_path=None, log_path=None, tensorboard_dir=None):
+    # Load existing memory
+    
+def write_memory(memory, random=False, append_to_previous=False):
+    if random:
+        memory_path = "/workspace/RL/random_memory.pkl"
+    else:
+        memory_path = "/workspace/RL/memory.pkl"
+
+    if append_to_previous and os.path.exists(memory_path):
+        with open(memory_path, 'rb') as f:
+            existing_memory = pickle.load(f)
+        print(f"Loaded {len(existing_memory)} existing memories.")
+        memory.extend(existing_memory)
+
+    print(f"Wrote {len(memory)} memories")
+    with open(memory_path, 'wb') as f:
+        pickle.dump(memory, f)
+
+def ddqn_loop(model_path=None, from_model_path=None, layer_sizes=None, memory_path=None, log_path=None, tensorboard_dir=None):
     # Players and strategies (BestStrategy for training perfectly)
-    ddqn_model = RLAgent(model_path, from_model_path, layer_sizes, memories_path, tensorboard_dir)
+    ddqn_model = RLAgent(model_path, from_model_path, layer_sizes, memory_path, tensorboard_dir)
     
     players = [
         ('Player1', ddqn_model),
@@ -77,7 +95,7 @@ def ddqn_loop(model_path=None, from_model_path=None, layer_sizes=None, memories_
     game = Game(players)
     game_lengths = []
 
-    for episode in range(100):
+    for episode in range(5000):
         game.reset()
 
         # Enable logging
@@ -91,47 +109,42 @@ def ddqn_loop(model_path=None, from_model_path=None, layer_sizes=None, memories_
         while not game.victor:
             game.turn()
 
-            if logging:
-                json.dump(game.get_state(), log_state)
-                log_state.write('\n')
-                log_move.write(str(game.active_player.chosen_move) + '\n') # Disabled for ddqn
+            # if logging:
+            #     json.dump(game.get_state(), log_state)
+            #     log_state.write('\n')
+            #     log_move.write(str(game.active_player.chosen_move) + '\n') # Disabled for ddqn
 
         game_lengths.append(game.half_turns)
 
-        ddqn_model.train(ddqn_model.game_length)
-        # ddqn_model.lr = max(ddqn_model.lr*0.99, 0.0001) if ddqn_model.step > 51 else ddqn_model.lr
         ddqn_model.replay()
-        ddqn_model.lr = max(ddqn_model.lr*0.992, 0.0008)
-        ddqn_model.replay()
+        # ddqn_model.replay()
 
         if episode % 10 == 0:
             avg = sum(game_lengths)/len(game_lengths)/2
             ddqn_model.update_target_model()
             ddqn_model.save_model(model_path)
+            if episode % 100 == 0:
+                write_memory(ddqn_model.memory)
 
-            print(f"Episode: {episode}, Epsilon: {ddqn_model.epsilon}, Average turns for last 10 games: {avg}, lr: {ddqn_model.lr}")
+            print(f"Episode: {episode}, Epsilon: {ddqn_model.epsilon}, Average turns for last 10 games: {avg}")
             game_lengths = []
     
-    # Save memories
-    with open("/workspace/RL/real_memories.pkl", 'wb') as f:
+    # Save memory
+    with open("/workspace/RL/real_memory.pkl", 'wb') as f:
         pickle.dump(list(ddqn_model.memory), f)
 
-def find_fastest_game(memories_path, append_to_previous):
+def find_fastest_game(memory_path, append_to_previous):
     from copy import deepcopy
-    fastest_memories = []
+    fastest_memory = []
 
-    while len(fastest_memories) < 180:
+    while len(fastest_memory) < 30:
         # Players
         players = [
-            ('Player1', RandomAgent(memories_path)),
-            ('Player2', RandomAgent(memories_path))
+            ('Player1', RandomAgent(memory_path)),
+            ('Player2', RandomAgent(memory_path))
         ]
 
         game = Game(players)
-
-        # Initialize a fake memory for remember() logic purposes
-        for player in game.players:
-            player.model.memory.append([None, None, None, None, None, None])
 
         checkpoint = deepcopy(game)
         original_checkpoint = deepcopy(game)
@@ -156,17 +169,11 @@ def find_fastest_game(memories_path, append_to_previous):
                     buys_since_checkpoint = 0
             
             if game.victor:
-                # print(game.half_turns)
-                if game.half_turns < 53:
+                if game.half_turns < 55:
                     print(game.half_turns)
                     for player in game.players:
                         if player.victor:
-                            pos = 0
-                            for mem in player.memories:
-                                if mem[2] > 0:
-                                    pos += 1
-                            print("pos:", pos)
-                            fastest_memories.append(list(player.model.memory.copy())[1:])
+                            fastest_memory.append(list(player.model.memory.copy())[1:])
                     found = True
                 else:
                     checkpoint = deepcopy(original_checkpoint)
@@ -176,19 +183,7 @@ def find_fastest_game(memories_path, append_to_previous):
             else:
                 game.turn()
 
-    flattened_memories = [item for sublist in fastest_memories for item in sublist]
-
-    # Load existing memory
-    memory_path = "/workspace/RL/random_memories.pkl"
-    if append_to_previous and os.path.exists(memory_path):
-        with open(memory_path, 'rb') as f:
-            existing_memories = pickle.load(f)
-        print(f"Loaded {len(existing_memories)} existing memories.")
-        flattened_memories.extend(existing_memories)
-
-    print("Number of memories:", len(flattened_memories))
-    with open(memory_path, 'wb') as f:
-        pickle.dump(flattened_memories, f)
+    flattened_memory = [item for sublist in fastest_memory for item in sublist]
 
 def show_game_rewards(players):
     for num, player in enumerate(players):

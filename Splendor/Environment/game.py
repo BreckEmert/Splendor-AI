@@ -76,7 +76,7 @@ class Game:
                 if sum(player.gems) < 10:
                     player.gems[5] += gold
                 else:
-                    discard, _ = player.choose_discard(self.to_vector(), player.gems, reward=0)
+                    discard, _ = player.choose_discard(self.to_vector(), player.gems, reward=-1/30)
                     player.take_or_spend_gems(discard)
                     player.gems[5] += gold
             case 'reserve top': # OTHER PLAYERS CAN'T ACTUALLY SEE THIS CARD
@@ -86,7 +86,7 @@ class Game:
                 if sum(player.gems) < 10:
                     player.gems[5] += gold
                 else:
-                    discard, _ = player.choose_discard(self.to_vector(), player.gems, reward=0)
+                    discard, _ = player.choose_discard(self.to_vector(), player.gems, reward=-1/30)
                     player.take_or_spend_gems(discard)
                     player.gems[5] += gold
 
@@ -99,7 +99,6 @@ class Game:
 
     def to_vector(self):
         board_vector = self.board.to_vector() # length 150 !change player.state_offset if this changes!
-        active_player = self.active_player.to_vector() # length 45
-        enemy_player = self.players[(self.half_turns+1) % 2].to_vector() # length 45
-
+        active_player = self.active_player.to_vector() # length 46
+        enemy_player = self.players[(self.half_turns+1) % 2].to_vector() # length 46
         return np.concatenate((board_vector, active_player, [0.0], enemy_player)).astype(np.float32)

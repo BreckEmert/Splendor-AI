@@ -19,12 +19,13 @@ class RandomAgent:
             loaded_memories = [mem for mem in flattened_memories]
             print(f"Loading {len(loaded_memories)} memories")
         else:
-            loaded_memories = []
+            loaded_memories = [[0, 0, 0, 0, 0]]
         return deque(loaded_memories, maxlen=50_000)
 
     def get_predictions(self, state, legal_mask):
         return np.where(legal_mask, np.random.rand(self.action_size), -np.inf)
 
     def remember(self, memory, legal_mask):
+        assert memory[2] is not None
         self.memory.append(memory)
         self.memory[-2].append(legal_mask)
