@@ -8,7 +8,7 @@ from .deck import Deck
 class Board:
     def __init__(self):
         # Gems
-        self.gems = np.array([6, 6, 6, 6, 6, 5], dtype=int) # [white, blue, green, red, black, gold]
+        self.gems = np.array([4, 4, 4, 4, 4, 5], dtype=int)  # [white, blue, green, red, black, gold]
 
         # Decks
         self.tier1 = Deck(0)
@@ -81,5 +81,5 @@ class Board:
             for card in self.cards[3]
         ]
 
-        state_vector = np.concatenate((*tier_vector, *nobles_vector)) # No longer including self.gems
-        return state_vector # length 150, UPDATE STATE_OFFSET IF THIS CHANGES
+        state_vector = np.concatenate((*tier_vector, *nobles_vector))  # No longer including self.gems
+        return state_vector  # length 150, UPDATE STATE_OFFSET IF THIS CHANGES

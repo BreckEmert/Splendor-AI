@@ -4,15 +4,19 @@ import json
 import os
 import pickle
 
-from Environment.game import Game # type: ignore
-from RL import RLAgent, RandomAgent # type: ignore
+from Environment.game import Game
+from RL import RLAgent, RandomAgent
 
 
 def debug_game(model_path=None, layer_sizes=None, memory_path=None, log_path=None):
     import json
 
-     # Players and strategies (BestStrategy for training perfectly)
+    # Players and strategies (BestStrategy for training perfectly)
     # ddqn_model = RLAgent(layer_sizes=layer_sizes)
+
+    # Make logging directories
+    states_log_dir = os.path.join(log_path, "game_states")
+    os.makedirs(states_log_dir, exist_ok=True)
     
     players = [
         ('Player1', RLAgent(layer_sizes=layer_sizes, memory_path=memory_path)),
@@ -22,17 +26,15 @@ def debug_game(model_path=None, layer_sizes=None, memory_path=None, log_path=Non
     game = Game(players)
     for episode in range(10_000):
         # Enable logging for all games
-        # log_state = open(os.path.join(log_path, "game_states", f"states_episode_{episode}.json"), 'w')
-        # log_move = open(os.path.join(log_path, "moves", f"moves_episode_{episode}.json"), 'w')
+        log_state = open(os.path.join(states_log_dir, f"states_episode_{episode}.json"), 'w')
 
         game.reset()
         while not game.victor:
             game.turn()
 
-        show_game_rewards(game.players)
-            # json.dump(game.get_state(), log_state)
-            # log_state.write('\n')
-            # log_move.write(str(game.active_player.chosen_move) + '\n') # Disabled for ddqn
+            json.dump(game.get_state(), log_state)
+            log_state.write('\n')
+        # show_game_rewards(game.players)
 
         # if episode == 100:
         #     print(len(game.active_player.model.memory))
@@ -101,7 +103,6 @@ def ddqn_loop(model_path=None, from_model_path=None, layer_sizes=None, memory_pa
         # Enable logging
         if log_path: # and episode%10 == 0
             log_state = open(os.path.join(log_path, "game_states", f"states_episode_{episode}.json"), 'w')
-            log_move = open(os.path.join(log_path, "moves", f"moves_episode_{episode}.json"), 'w')
             logging = True
         else:
             logging = False
@@ -109,40 +110,44 @@ def ddqn_loop(model_path=None, from_model_path=None, layer_sizes=None, memory_pa
         while not game.victor:
             game.turn()
 
-            # if logging:
-            #     json.dump(game.get_state(), log_state)
-            #     log_state.write('\n')
-            #     log_move.write(str(game.active_player.chosen_move) + '\n') # Disabled for ddqn
+            if logging:
+                json.dump(game.get_state(), log_state)
+                log_state.write('\n')
 
         game_lengths.append(game.half_turns)
 
         ddqn_model.replay()
-        # ddqn_model.replay()
 
         if episode % 10 == 0:
-            avg = sum(game_lengths)/len(game_lengths)/2
             ddqn_model.update_target_model()
-            ddqn_model.save_model(model_path)
             if episode % 100 == 0:
+                ddqn_model.save_model(model_path)
                 write_memory(ddqn_model.memory)
 
-            print(f"Episode: {episode}, Epsilon: {ddqn_model.epsilon}, Average turns for last 10 games: {avg}")
+            avg = sum(game_lengths)/len(game_lengths)/2
+            print(f"Episode: {episode}, Average turns for last 10 games: {avg}")
             game_lengths = []
     
     # Save memory
     with open("/workspace/RL/real_memory.pkl", 'wb') as f:
         pickle.dump(list(ddqn_model.memory), f)
 
-def find_fastest_game(memory_path, append_to_previous):
+def find_fastest_game(memory_path):
     from copy import deepcopy
     fastest_memory = []
 
-    while len(fastest_memory) < 30:
+    while len(fastest_memory) < 150:
         # Players
-        players = [
-            ('Player1', RandomAgent(memory_path)),
-            ('Player2', RandomAgent(memory_path))
-        ]
+        if not len(fastest_memory):
+            players = [
+                ('Player1', RandomAgent(memory_path)),
+                ('Player2', RandomAgent(memory_path))
+            ]
+        else:
+            players = [
+                ('Player1', RandomAgent()),
+                ('Player2', RandomAgent())
+            ]
 
         game = Game(players)
 
@@ -154,12 +159,12 @@ def find_fastest_game(memory_path, append_to_previous):
         found = False
         while not found:
             game.turn()
-            # print("\nTaking turn ", game.half_turns)
+            
             if 15 <= game.active_player.move_index < 44:
                 # print("Buying")
                 buys_since_checkpoint += 1
                 if buys_since_checkpoint == 2:
-                    if game.half_turns - last_buy_turn < 16:
+                    if game.half_turns - last_buy_turn <= 16:
                         last_buy_turn = game.half_turns
                         # print("Setting last_buy_turn to ", last_buy_turn)
                         checkpoint = deepcopy(game)
@@ -169,7 +174,7 @@ def find_fastest_game(memory_path, append_to_previous):
                     buys_since_checkpoint = 0
             
             if game.victor:
-                if game.half_turns < 55:
+                if game.half_turns < 54:
                     print(game.half_turns)
                     for player in game.players:
                         if player.victor:
@@ -184,6 +189,7 @@ def find_fastest_game(memory_path, append_to_previous):
                 game.turn()
 
     flattened_memory = [item for sublist in fastest_memory for item in sublist]
+    write_memory(flattened_memory, random=True)
 
 def show_game_rewards(players):
     for num, player in enumerate(players):
