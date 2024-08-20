@@ -159,6 +159,7 @@ def find_fastest_game(memory_path):
         found = False
         while not found:
             game.turn()
+            
             if 15 <= game.active_player.move_index < 44:
                 # print("Buying")
                 buys_since_checkpoint += 1
@@ -188,7 +189,6 @@ def find_fastest_game(memory_path):
                 game.turn()
 
     flattened_memory = [item for sublist in fastest_memory for item in sublist]
-
     write_memory(flattened_memory, random=True)
 
 def show_game_rewards(players):
