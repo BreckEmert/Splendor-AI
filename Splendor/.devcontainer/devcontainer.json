@@ -1,0 +1,31 @@
+// .devcontainer/devcontainer.json
+{
+    "name": "SplendorDev",
+    "build": {
+        "dockerfile": "Dockerfile",
+        "context": ".",
+        "args": {
+            // None
+        }
+    },
+    "runArgs": [
+        "--gpus", "all",
+        "--shm-size=1g",
+        "--ulimit", "memlock=-1",
+        "--ulimit", "stack=67108864",
+        "--net=host"
+    ],
+    "workspaceFolder": "/workspace",
+    "workspaceMount": "source=/c/Users/Public/Documents/Python_Files/Splendor,target=/workspace,type=bind,consistency=cached",
+    "customizations": {
+        "vscode": {
+            "settings": { 
+                "terminal.integrated.gpuAcceleration": "on"
+            },
+            "extensions": [
+                "ms-python.python",
+                "xyz.local-history"
+            ]
+        }
+    }
+}
