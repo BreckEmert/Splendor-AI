@@ -1,312 +1,379 @@
-# Splendor/Environment/Splendor_components/Player_components/player.py
+# Splendor/Environment/Splendor_components/player.py
 
-from __future__ import annotations
 import numpy as np
-from numpy import ndarray
-import itertools as it
-from typing import TYPE_CHECKING
-
-if TYPE_CHECKING:
-    from .human_agent import HumanAgent
-    from RL import InferenceAgent
-    from Play.common_types import GUIMove
 
 
 class Player:
-    def __init__(self, name: str, agent: InferenceAgent | HumanAgent, pos: int):
-        self.name = name
-        self.agent = agent
-        self.pos = pos
-        self.reset()
-        self._initialize_all_takes()
-        self._initialize_dimensions()
+    def __init__(self, name, model):
+        self.name: str = name
+        self.model = model
+        self.state_offset: int = 150
     
     def reset(self):
-        self.gems: ndarray = np.zeros(6, dtype=int)  # Gold gem so 6
-        self.cards: ndarray = np.zeros(6, dtype=int)  # Last dim unused but matches 6
+        self.gems: np.ndarray = np.zeros(6, dtype=int)
+        self.cards: np.ndarray = np.zeros(5, dtype=int)
         self.reserved_cards: list = []
+        self.points: int = 0
 
-        self.card_ids: list = [[] for _ in range(5)]
-        self.points: float = 0.0
+        self.card_ids: list = [[[], [], [], [], []], [[], [], [], [], []], 
+                               [[], [], [], [], []], [[], [], [], [], []]]
         self.victor: bool = False
+        self.move_index = 9999
 
-    @property
-    def effective_gems(self) -> ndarray:
-        return self.gems + self.cards
+    def take_or_spend_gems(self, gems_to_change):
+        if len(gems_to_change) < 6:
+            gems_to_change = np.pad(gems_to_change, (0, 6-len(gems_to_change)))
+        self.gems += gems_to_change
 
-    def _initialize_all_takes(self) -> None:
-        """Preloads all possible take indices."""
-        # Take 3
-        indices = list(it.combinations(range(5), 3))
-        all_takes = np.zeros((10, 6), dtype=int)
-        for index, combo in enumerate(indices):
-            all_takes[index, combo] = 1
-        self.all_takes_3 = all_takes
+        # Validate gem counts
+        assert np.all(self.gems >= 0), f"Illegal player gems: {self.gems}, {gems_to_change}"
+        assert sum(self.gems) <= 10, f"Illegal player gems: {self.gems}, {gems_to_change}"
 
-        # Take 2 (different)
-        indices = list(it.combinations(range(5), 2))
-        all_takes = np.zeros((10, 6), dtype=int)
-        for index, combo in enumerate(indices):
-            all_takes[index, combo] = 1
-        self.all_takes_2_diff = all_takes
-        
-        # Take 2 (same)
-        self.all_takes_2_same = np.zeros((5, 6), dtype=int)
-        self.all_takes_2_same[np.arange(5), np.arange(5)] = 2
-
-        # Take 1
-        self.all_takes_1 = np.zeros((5, 6), dtype=int)
-        self.all_takes_1[np.arange(5), np.arange(5)] = 1
-
-    def _initialize_dimensions(self) -> None:
-        """Preload regularly used dim vars."""
-        self.take_dim = (
-            len(self.all_takes_3) * 4 +       # 10 * 4
-            len(self.all_takes_2_same) * 3 +  # 5 * 3
-            len(self.all_takes_2_diff) * 3 +  # 10 * 3
-            len(self.all_takes_1) * 2 +       # 5 * 2
-            1                                 # discard
-        )
-
-        self.buy_dim = (
-            3 * 4 * 2 +  # 3 tiers × 4 cards per tier × (w/wo gold)
-            3 * 2        # 3 reserve slots × (w/wo gold)
-        )
-
-        self.reserve_dim = (
-            3 * 5 # 3 tiers * (4 cards per tier + top of deck)
-        )
-
-        self.action_dim = self.take_dim + self.buy_dim + self.reserve_dim
-
-    def get_bought_card(self, card) -> None:
-        """Handles all buying on the player's end except
-        for the gems, which is handled by _auto_discard.
-        """
+    def get_bought_card(self, card):
         self.cards[card.gem] += 1
         self.points += card.points
-        self.card_ids[card.gem].append((card.tier, card.id))
+        self.card_ids[card.tier][card.gem].append(card.id)
 
-    def auto_spend(self, raw_cost: ndarray, with_gold: bool) -> ndarray:
-        """For now, random spend logic.  Modifies player gems 
-        IN PLACE.  Also ENSURE that this and other methods 
-        receive .copy() objects, as this does modify card_cost.
-        raw_cost is guaranteed to be affordable, so doing
-        spent_gems[5] = card_cost.sum() is completely fine.
-        """
-        # Discount the cost with our purchased cards
-        card_cost = np.maximum(raw_cost - self.cards, 0)
+    def choose_discard(self, state, player_gems, progress=0, reward=0.0, move_index=None):
+        # Set legal mask to only legal discards
+        legal_mask = np.zeros(61, dtype=bool)
+        legal_mask[10:15] = player_gems[:5] > 0
 
-        # Pay what we can with regular gems
-        spent_gems = np.minimum(self.gems, card_cost)
+        if not move_index:
+            # Call the model to choose a discard
+            rl_moves = self.model.get_predictions(state, legal_mask)
+            move_index = np.argmax(rl_moves)
 
-        # Pay the rest with gold
-        if with_gold:
-            spent_gems[5] = card_cost.sum() - spent_gems.sum()
+        gem_index = move_index - 10
+        discard = np.zeros(5, dtype=int)
+        discard[gem_index] = -1
 
-        # Return spent_gems so the board can update as well
-        self.gems -= spent_gems
-        return spent_gems
+        # Remember
+        next_state = state.copy()
+        next_state[gem_index+self.state_offset] -= 0.25
+        state[196] = 0.2*progress  # 0.2 * (moves remaining+1), indicating progression through loop
+        memory = [state.copy(), move_index, reward, next_state.copy(), 1]
+        self.model.remember(memory, legal_mask.copy())
 
-    def auto_take(self, gems_to_take: ndarray) -> tuple[ndarray, int]:
-        """Add gems_to_take to self.gems, and if discards are
-        needed try to discard gems that weren't taken (avoids 
-        combinatorial discard space and does not significantly 
-        limit gameplay).
+        # Update player in the game state (not board anymore)
+        state = next_state.copy() # Do we need to do .copy()
+
+        return discard, state
+    
+    def choose_take(self, state, available_gems, progress, reward=0.0, take_index=None):
+        # Set legal mask to only legal takes
+        legal_mask = np.zeros(61, dtype=bool)
+        legal_mask[:5] = available_gems > 0
+
+        if not take_index:
+            # Call the model to choose a take
+            rl_moves = self.model.get_predictions(state, legal_mask)
+            take_index = np.argmax(rl_moves)
         
-        Ideally would have logic to competitively discard, 
-        (sometimes I have wanted to discard gold so that the
-        gems are frozen for the enemy player) but for now that 
-        is out of the learning scope.
-        """
-        # Check if this is a reserve reward (gold only)
-        gold_only = gems_to_take[5] > 0
+        take = np.zeros(5, dtype=int)
+        take[take_index] = 1
 
-        # Add gems to self.gems and handle reserve gold reward
-        self.gems += gems_to_take  # Always add gems
-        self_gems = self.gems[:5]
-        
-        # Now discard if required
-        n_discards = max(0, self.gems.sum() - 10)
-        discards = np.zeros(6, dtype=int)
+        # Remember
+        next_state = state.copy()
+        next_state[take_index+self.state_offset] += 0.25
+        state[196] = progress  # 0.2 * (moves remaining+1), indicating progression through loop
+        memory = [state.copy(), take_index, reward, next_state.copy(), 1]
+        self.model.remember(memory, legal_mask.copy())
 
-        while discards.sum() < n_discards:
-            # Try to prefer discarding gems we didn't take
-            discard_prefs = np.where((self_gems > 0) & (gems_to_take[:5] == 0))[0]
-            if discard_prefs.size > 0:
-                color = np.random.choice(discard_prefs)
+        return take, next_state
+
+    def take_tokens_loop(self, state, board_gems, move_index=None):
+        player_gems = self.gems[:5].copy()
+        total_gems = sum(self.gems)
+        board_gems = (board_gems>0).astype(int)
+
+        state = state.copy()
+
+        takes = min(3, sum(board_gems))
+        discards = total_gems - 7
+        discard_reward = -1/30*discards
+        chosen_gems = np.zeros(5, dtype=int)
+
+        # Perform the move that was initially chosen
+        if move_index:
+            if move_index < 5:
+                chosen_gem, state = self.choose_take(
+                    state, board_gems, 0.6, 0.0, move_index)
+                takes -= 1
             else:
-                discardable = np.where(self_gems > 0)[0]
-                color = np.random.choice(discardable)
+                chosen_gem, state = self.choose_discard(
+                    state, self.gems, 0.6, discard_reward, move_index)
+                discards -= 1
+            chosen_gems += chosen_gem
 
-            # Discard 1 gem from that color
-            self_gems[color] -= 1
-            discards[color] += 1
+        # Choose necessary discards
+        while discards > 0:
+            discard, state = self.choose_discard(
+                state, player_gems+chosen_gems, progress=discards, reward=discard_reward)
+            # discard_reward = 0.0
+            chosen_gems += discard
+            discards -= 1
+        
+        # Choose necessary takes
+        while takes > 0:
+            take, state = self.choose_take(
+                state, board_gems-chosen_gems, progress=takes, reward=-1/30)
+            chosen_gems += take
+            takes -= 1
 
-        # Gems we were supposed to take minus what we had to disard
-        net_take = gems_to_take - discards
+        return chosen_gems
 
-        # Add back on the gold
-        if gold_only:
-            net_take[5] = 1
+    def buy_with_gold_loop(self, next_state, move_index, card):
+        starting_gems = self.gems.copy()
+        chosen_gems = np.zeros(6, dtype=int)
+        legal_mask = np.zeros(61, dtype=bool) # Action vector size
+        cost = card.cost - self.cards
+        cost = np.maximum(cost, 0)
+        cost = np.append(cost, 0)
+        state = next_state.copy()
 
-        return net_take, n_discards
+        while sum(cost) > 0:
+            gems = starting_gems + chosen_gems  # Update the player's gems to a local variable
 
-    def _get_legal_takes(self, board_gems: ndarray) -> ndarray:
-        """For each possible take, there are ||take|| possible
-        discards.  Because these are automatically discarded
-        there is no combinatorics needed.
-        """
-        legal_take_mask = np.zeros(96, dtype=bool)
+            # Legal tokens to spend
+            legal_mask[10:15] = (gems*cost != 0)[:5]  # Can only spend gems where card cost remains
+            legal_mask[60] = True if gems[5] else False  # Enable spending gold as a legal move
 
-        """TAKE 3"""
-        n_discards = max(0, -7+self.gems.sum())
-        for index, combo in enumerate(self.all_takes_3):
-            if np.all(board_gems >= combo):
-                legal_take_mask[4*index + n_discards] = True
+            # Predict token to spend
+            rl_moves = self.model.get_predictions(state, legal_mask)
+            move_index = np.argmax(rl_moves)
+            gem_index = move_index-10 if move_index != 60 else 5
 
-        """TAKE 2 (SAME)"""
-        n_discards = max(0, n_discards-1)
-        for gem_index in range(5):
-            if board_gems[gem_index] >= 4:
-                legal_take_mask[40 + 3*gem_index + n_discards] = True
+            # Remember
+            next_state = state.copy()
+            next_state[gem_index+self.state_offset] -= 0.25
+            memory = [state.copy(), move_index, 1/30, next_state.copy(), 1]
+            self.model.remember(memory, legal_mask.copy())
 
-        """TAKE 2 (DIFFERENT)"""
-        for index, combo in enumerate(self.all_takes_2_diff):
-            if np.all(board_gems >= combo):
-                legal_take_mask[55 + 3*index + n_discards] = True
+            # Update player in game state
+            state = next_state.copy()
 
-        """TAKE 1"""
-        n_discards = max(0, n_discards-1)
-        for index, combo in enumerate(self.all_takes_1):
-            if np.all(board_gems >= combo):
-                legal_take_mask[85 + 2*index + n_discards] = True
+            # Propagate move
+            chosen_gems[gem_index] -= 1
+            cost[gem_index] -= 1
 
-        """Backup discard"""
-        if self.gems.sum() == 10:
-            legal_take_mask[-1] = True
+        return chosen_gems
 
-        return legal_take_mask
-
-    def can_afford_card(self, card) -> tuple[bool, bool]:
-        # Calculate costs
-        gem_difference = card.cost - self.effective_gems
-        gold_needed = np.maximum(gem_difference, 0).sum()
-
-        # Check if we can afford it
-        afford_wo_gold = (gold_needed == 0)
-        afford_with_gold = (gold_needed <= self.effective_gems[5])
-
-        return afford_wo_gold, afford_with_gold
-
-    def gold_choice_exists(self, card) -> bool:
-        cost = np.maximum(card.cost - self.cards, 0)
-        colored_cost = cost[:5].sum()
-        colored_pay = np.minimum(self.gems[:5], cost[:5]).sum()
-        gold_needed = colored_cost - colored_pay
-
-        # No payment required, so no choice to use gold
-        if colored_cost == 0:
-            return False
-
-        # Gold isn't required but we have gold
-        if gold_needed == 0:
-            return self.gems[5] > 0
-
-        # Gold is required but we have surplus
-        return self.gems[5] > gold_needed
-
-    def _get_legal_buys(self, board_cards) -> list:
-        legal_buy_mask = []
+    def get_legal_moves(self, board):
+        effective_gems = self.gems.copy()
+        effective_gems[:5] += self.cards
+        legal_moves = []
 
         # Buy card
-        for tier_index in range(3):
-            for card_index in range(4):
-                if board_cards[tier_index][card_index]:
-                    card = board_cards[tier_index][card_index]
-                    afford_wo_gold, afford_with_gold = self.can_afford_card(card)
-                    legal_buy_mask.extend([afford_wo_gold, afford_with_gold])
-                else:
-                    legal_buy_mask.extend([False, False])
+        for tier_index, tier in enumerate(board.cards[:3]):
+            for card_index, card in enumerate(tier):
+                if card:
+                    can_afford = can_afford_with_gold = True
+                    gold_needed = 0
 
-        # Buy a reserved card
-        for reserve_index in range(3):
-            if reserve_index < len(self.reserved_cards):
-                card = self.reserved_cards[reserve_index]
-                afford_wo_gold, afford_with_gold = self.can_afford_card(card)
-                legal_buy_mask.extend([afford_wo_gold, afford_with_gold])
-            else:
-                legal_buy_mask.extend([False, False])
+                    for gem_index, amount in enumerate(card.cost):
+                        if effective_gems[gem_index] < amount:
+                            can_afford = False
+                            gold_needed += amount - effective_gems[gem_index]
+                            if gold_needed > effective_gems[5]:
+                                can_afford_with_gold = False
+                                break
 
-        return legal_buy_mask
+                    if can_afford:
+                        legal_moves.append(('buy', (tier_index, card_index)))
+                    elif can_afford_with_gold:
+                        legal_moves.append(('buy with gold', (tier_index, card_index)))
 
-    def _get_legal_reserves(self, board) -> list:
-        """This will almost never happen after a bit of training"""
+        # Buy reserved card
+        for card_index, card in enumerate(self.reserved_cards):
+            can_afford = can_afford_with_gold = True
+            gold_needed = 0
+
+            for gem_index, amount in enumerate(card.cost):
+                if effective_gems[gem_index] < amount:
+                    can_afford = False
+                    gold_needed += amount - effective_gems[gem_index]
+                    if gold_needed > effective_gems[5]:
+                        can_afford_with_gold = False
+                        break
+
+            if can_afford:
+                legal_moves.append(('buy reserved', (None, card_index)))
+            elif can_afford_with_gold:
+                legal_moves.append(('buy reserved with gold', (None, card_index)))
+
+        if len(legal_moves) > 0:
+            return legal_moves
+        
+        # Take gems
+        if sum(self.gems) < 10:
+            for gem, amount in enumerate(board.gems[:5]):
+                if amount:
+                    legal_moves.append(('take', (gem, 1)))
+                    if sum(self.gems) <= 8:  # We actually can take 2 if more than 8 but will need discard
+                        if amount >= 4:
+                            legal_moves.append(('take', (gem, 2)))
+        else: # Discard first, per take_tokens_loop logic
+            for gem, amount in enumerate(self.gems[:5]):
+                if amount:
+                    legal_moves.append(('take', (gem, -1)))
+
+        # Reserve card
         if len(self.reserved_cards) < 3:
-            legal_reserve_mask = []
-            for tier_index, tier in enumerate(board.cards):
-                for card in tier:
-                    legal_reserve_mask.append(bool(card))
-                remaining_deck = board.decks[tier_index].cards
-                legal_reserve_mask.append(bool(remaining_deck))
-        else:
-            legal_reserve_mask = [False] * 15
+            for tier_index, tier in enumerate(board.cards[:3]):
+                for card_index, card in enumerate(tier):
+                    if card:
+                        legal_moves.append(('reserve', (tier_index, card_index)))
+                if board.deck_mapping[tier_index].cards:
+                    legal_moves.append(('reserve top', (tier_index, None)))
         
-        return legal_reserve_mask
-
-    def get_legal_moves(self, board) -> ndarray:
-        legal_take_mask = self._get_legal_takes(board.gems)
-        legal_buy_mask = self._get_legal_buys(board.cards)
-        legal_reserve_mask = self._get_legal_reserves(board)
-        
-        legal_mask = np.concatenate(
-            [legal_take_mask, legal_buy_mask, legal_reserve_mask]
-        )
+        return legal_moves
+    
+    def legal_to_vector(self, legal_moves):
+        legal_mask = np.zeros(61, dtype=bool)
+        for move, details in legal_moves:
+            tier, card_index = details
+            match move:
+                case 'take':
+                    gem, amount = details # Overriding tier and card_index
+                    if amount == 1:
+                        legal_mask[gem] = True
+                    elif amount == 2:
+                        legal_mask[gem+5] = True
+                    elif amount == -1:
+                        legal_mask[gem+10] = True
+                case 'buy':
+                    legal_mask[15 + 4*tier + card_index] = True
+                case 'buy reserved':
+                    legal_mask[27 + card_index] = True
+                case 'buy with gold':
+                    legal_mask[30 + 4*tier + card_index] = True
+                case 'buy reserved with gold':
+                    legal_mask[42 + card_index] = True
+                case 'reserve':
+                    legal_mask[45 + 4*tier + card_index] = True
+                case 'reserve top':
+                    legal_mask[57 + tier] = True
 
         return legal_mask
+    
+    def vector_to_details(self, state, board, legal_mask, move_index):
+        tier = move_index % 15 // 4
+        card_index = move_index % 15 % 4
 
-    def choose_move(self, board, state) -> "int | GUIMove":
-        """Note: the only point by which human and AI agent differ."""
-        legal_mask = self.get_legal_moves(board)
+        if move_index < 15:  # Take (includes discarding a gem)
+            if move_index < 5 or move_index >= 10: # Take 3
+                chosen_gems = self.take_tokens_loop(state, board.gems[:5], move_index)
+            else: # Take 2
+                # Remember
+                gem_index = move_index % 5
+                next_state = state.copy()
+                next_state[gem_index+self.state_offset] += 0.5
+                memory = [state.copy(), move_index, -1/30, next_state.copy(), 1]
+                self.model.remember(memory, legal_mask.copy())
 
-        if hasattr(self.agent, "get_predictions"):
-            # Self-play call, only need the chosen move
-            rl_moves = self.agent.get_predictions(state, legal_mask)  # type: ignore
-            return int(np.argmax(rl_moves))
-        else:
-            # Human call, send in the legal mask
-            # Reminder that self.agent is Play/human_agent.py
-            return self.agent.await_move()  # type: ignore
+                chosen_gems = np.zeros(6, dtype=int)
+                chosen_gems[gem_index] = 2
+            
+            move = ('take', (chosen_gems, None))
 
-    def to_state(self) -> ndarray:
-        """Some overwriting occurs because of the 6-dim vector
-        standardization, so note that not all [5] have meaning.
-        """
-        state_vector = np.zeros(47, dtype=np.float32)
+        elif move_index < 45: # Buy
+            # Remember
+            # ~15/1.3 purchases in a game? y=\frac{2}{15}-\frac{2}{15}\cdot\frac{1.3}{15}x
+            # reward = max(3/15-3/15*1.3/15*sum(self.gems), 0.0)
+            reserved_card_index = move_index-27 if move_index<30 else move_index-42
+            if tier < 3:  # Buy
+                points = board.cards[tier][card_index].points
+            else:  # Buy reserved
+                points = self.reserved_cards[reserved_card_index].points
+            reward = min(points, 15-self.points) / 30
 
-        # Gems (6+1 = 7)
-        state_vector[:6] = self.gems / 4.0
-        state_vector[5] /= 1.25  # Normalize to 5
-        state_vector[6] = self.gems.sum() / 10.0
+            # Check noble visit and end of game
+            if self.check_noble_visit(board):
+                reward += min(3, 15-self.points) / 15
 
-        # Cards (5+1 = 6)
-        state_vector[7:13] = self.cards  # Note there are no gold cards
-        state_vector[12] = self.cards.sum() / 10  # so we overwrite [12]
+            if self.points+points >= 15:
+                reward += 10
+                memory = [state.copy(), move_index, reward, state.copy(), 0]
+                self.model.remember(memory, legal_mask.copy())
+                self.model.memory[-1].append(legal_mask.copy())
+                self.victor = True
+                return None
 
-        # Reserved cards (11*3 = 33)
-        start = 13
-        for card in self.reserved_cards:
-            state_vector[start:start+11] = card.to_vector(self.effective_gems)
-            start += 11
+            next_state = state.copy()
+            offset = 11 * (4*tier + card_index)
+            next_state[offset:offset+11] = board.deck_mapping[tier].peek_vector()
+            memory = [state.copy(), move_index, reward, next_state.copy(), 1]
+            self.model.remember(memory, legal_mask.copy())
+            
+            if move_index < 27:
+                move = ('buy', (tier, card_index))
+            elif move_index < 30:
+                move = ('buy reserved', (None, reserved_card_index))
+            elif move_index < 42:
+                card = board.cards[tier][card_index]
+                spent_gems = self.buy_with_gold_loop(next_state, move_index, card)
+                move = ('buy with gold', ((tier, card_index), spent_gems))
+            else:
+                card = self.reserved_cards[reserved_card_index]
+                spent_gems = self.buy_with_gold_loop(next_state, move_index, card)
+                move = ('buy reserved with gold', (card_index, spent_gems))
 
-        # Points
-        state_vector[-1] = self.points / 15
+        else: # < 60 Reserve
+            if move_index < 57:
+                offset = 11 * (4*tier + card_index)
+                move = ('reserve', (tier, card_index))
+            else:
+                offset = self.state_offset + len(self.reserved_cards)*11
+                move = ('reserve top', (move_index-57, None))
 
-        return state_vector  # length 47
+            # Remember
+            next_state = state.copy()
+            next_state[offset:offset+11] = board.deck_mapping[tier].peek_vector()
+            reward = 0.0 if sum(self.gems) < 10 else 0.0
+            memory = [state.copy(), move_index, reward, next_state.copy(), 1]
+            self.model.remember(memory, legal_mask.copy())
 
-    def clone(self):
-        clone = Player.__new__(Player)
-        clone.__dict__ = self.__dict__.copy()
-        clone.gems  = self.gems.copy()
-        clone.cards = self.cards.copy()
-        return clone
+        return move
+    
+    def choose_move(self, board, state):
+        legal_moves = self.get_legal_moves(board)
+        legal_mask = self.legal_to_vector(legal_moves)
+        rl_moves = self.model.get_predictions(state, legal_mask)
+        
+        self.move_index = np.argmax(rl_moves)
+        return self.vector_to_details(state, board, legal_mask, self.move_index)
+    
+    def check_noble_visit(self, board):
+        for index, noble in enumerate(board.cards[3]):
+            if noble and np.all(self.cards >= noble.cost):
+                self.points += noble.points
+                board.cards[3][index] = None
+                return True  # No logic to tie-break, seems too insignificant for training
+        return False
+
+    def get_state(self):
+        chosen_move = int(self.move_index)
+        self.move_index = 9999
+        return {
+            'gems': self.gems.tolist(), 
+            'cards': self.card_ids, 
+            'reserved_cards': [(card.tier, card.id) for card in self.reserved_cards], 
+            'chosen_move': chosen_move, 
+            'points': int(self.points)
+        }
+
+    def to_vector(self):
+        reserved_cards_vector = np.zeros(33)
+        for i, card in enumerate(self.reserved_cards):
+            reserved_cards_vector[i*11:(i+1)*11] = card.vector
+
+        state_vector = np.concatenate((
+            self.gems/4,  # length 6, there are actually 5 gold but 0 is all that matters
+            [sum(self.gems)/10],  # length 1
+            self.cards/4,  # length 5
+            reserved_cards_vector,  # length 11*3 = 33
+            [self.points/15]  # length 1
+        ))
+
+        return state_vector  # length 46

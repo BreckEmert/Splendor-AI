@@ -1,38 +1,43 @@
 # Splendor/RL/model.py
 
-from collections import deque
 import os
+import pickle
+from collections import deque
+from copy import deepcopy
 from random import sample
-
 import numpy as np
+
 import tensorflow as tf
-from keras.config import enable_unsafe_deserialization
-from keras.layers import Input, Dense, Concatenate, Lambda, LeakyReLU, BatchNormalization
-from keras.models import load_model
-from keras.initializers import GlorotNormal, HeNormal
-from keras.optimizers import Adam
-from keras.optimizers.schedules import ExponentialDecay
-from keras.regularizers import l2
+from keras.config import enable_unsafe_deserialization                                      # type: ignore
+from keras.layers import Input, Dense, Concatenate, Lambda, LeakyReLU, BatchNormalization   # type: ignore
+from keras.losses import mean_squared_error                                                 # type: ignore
+from keras.models import load_model                                                         # type: ignore
+from keras.initializers import GlorotNormal, HeNormal                                       # type: ignore
+from keras.optimizers import Adam                                                           # type: ignore
+from keras.optimizers.schedules import ExponentialDecay                                     # type: ignore
+from keras.regularizers import l2                                                           # type: ignore
 
 
 class RLAgent:
-    def __init__(self, model_path=None, from_model_path=None, layer_sizes=None, memory_path=None, tensorboard_dir=None):
+    def __init__(self, model_save_path=None, model_from_path=None, 
+                 layer_sizes=None, preexisting_memory=None, tensorboard_dir=None):
+        print("Making a new RLAgent.")
         enable_unsafe_deserialization()
-        self.state_size = 243 # Size of state vector
-        self.action_size = 61 # Maximum number of actions 
+        self.state_size = 243
+        self.action_size = 61
 
-        self.memory = self.load_memory(memory_path)
+        self.memory = self.load_memory(preexisting_memory)
         self.batch_size = 128
 
-        self.gamma = 0.99 # 0.1**(1/25)
-        self.epsilon = 1.0  # exploration rate
+        self.gamma = 0.1  # 0.1**(1/25)
+        self.epsilon = 1.0
         self.epsilon_min = 0.04
         self.epsilon_decay = 0.995
         self.lr = 0.01
 
-        if from_model_path:
-            self.model = load_model(from_model_path)
-            self.target_model = load_model(from_model_path)
+        if model_from_path:
+            self.model = load_model(model_from_path)
+            self.target_model = load_model(model_from_path)
 
         else:
             print("Building a new model")
@@ -49,10 +54,10 @@ class RLAgent:
         state_input = Input(shape=(self.state_size, ))
 
         dense1 = Dense(layer_sizes[0], 
-                       kernel_initializer=HeNormal(), # kernel_regularizer=l2(0.001), 
+                       kernel_initializer=HeNormal(),  # l2(0.001), 
                        name='Dense1')(state_input)
         dense1 = LeakyReLU(alpha=0.3)(dense1)
-        dense1 = BatchNormalization(name='dense1')(dense1)
+        # dense1 = BatchNormalization(name='dense1')(dense1)
 
         # dense2 = Dense(layer_sizes[1], kernel_initializer=HeNormal(), name='Dense2')(dense1)
         # dense2 = LeakyReLU(alpha=0.3)(dense2)
@@ -69,35 +74,54 @@ class RLAgent:
     
     def load_memory(self, memory_path):
         if memory_path:
-            import pickle
             with open(memory_path, 'rb') as f:
                 flattened_memory = pickle.load(f)
             loaded_memory = [mem for mem in flattened_memory]
             print(f"Loading {len(loaded_memory)} memories")
         else:
-            loaded_memory = [[0, 0, 0, 0, 0]]
+            # Should be run with preexisting memory from training.find_fastest_game
+            # because this memory is bad
+            dummy_state = np.zeros(self.state_size, dtype=np.float32)
+            dummy_mask = np.ones(self.action_size, dtype=bool)
+            loaded_memory = [[dummy_state, 1, 1, dummy_state, 1, dummy_mask]]
         return deque(loaded_memory, maxlen=50_000)
+    
+    def write_memory(memory, append_to_previous=False):
+        memory_path = "/workspace/RL/memory.pkl"
+
+        # Get the old memories if we don't want to overwrite them
+        if append_to_previous:
+            with open(memory_path, 'rb') as f:
+                existing_memory = pickle.load(f)
+            print(f"Loaded {len(existing_memory)} existing memories.")
+            existing_memory.extend(memory)
+            memory = existing_memory
+
+        # Write out the memories
+        with open(memory_path, 'wb') as f:
+            pickle.dump(memory, f)
+
+        print(f"Wrote {len(memory)} memories to {memory_path}")
+        print("Absolute memory path: ", os.path.abspath(memory_path))
 
     def update_target_model(self):
         self.target_model.set_weights(self.model.get_weights())
 
+    @tf.function
     def get_predictions(self, state, legal_mask):
-        if np.random.rand() <= self.epsilon:
-            qs = np.random.rand(self.action_size)  # Exploration
+        if tf.random.uniform(()) <= self.epsilon:
+            qs = tf.random.uniform([self.action_size])
         else:
             state = tf.reshape(state, [1, self.state_size])
-            qs = self.model.predict(state, verbose=0)[0]  # All actions
-
-        # Illegal move filter
-        qs = np.where(legal_mask, qs, -np.inf)
-
-        return qs
+            qs = self.model(state, training=False)[0]
+        
+        return tf.where(legal_mask, qs, tf.fill(qs.shape, -tf.float32.max))
 
     def remember(self, memory, legal_mask):
-        # assert memory[2] >= 0, f'Reward is {memory[2]}'
-        self.memory.append(memory)
-        self.memory[-2].append(legal_mask)
+        self.memory.append(deepcopy(memory))
+        self.memory[-2].append(legal_mask.copy())
 
+    @tf.function
     def _batch_train(self, batch):
         states = tf.convert_to_tensor([mem[0] for mem in batch], dtype=tf.float32)
         actions = tf.convert_to_tensor([mem[1] for mem in batch], dtype=tf.int32)
@@ -106,18 +130,16 @@ class RLAgent:
         dones = tf.convert_to_tensor([mem[4] for mem in batch], dtype=tf.float32)
         legal_masks = tf.convert_to_tensor([mem[5] for mem in batch], dtype=tf.bool)
 
-        # assert np.all(rewards >= 0), 'rewards are lt 0'
-
         # Calculate this turn's qs with primary model
-        qs = self.model.predict(states, verbose=0)
+        qs = self.model(states, training=False)
 
         # Predict next turn's actions with primary model
-        next_actions = self.model.predict(next_states, verbose=0)
+        next_actions = self.model(next_states, training=False)
         next_actions = tf.where(legal_masks, next_actions, tf.fill(next_actions.shape, -np.inf))
         next_actions = tf.argmax(next_actions, axis=1, output_type=tf.int32)
 
         # Calculate next turn's qs with target model
-        next_qs = self.target_model.predict(next_states, verbose=0)
+        next_qs = self.target_model(next_states, training=False)
         selected_next_qs = tf.gather_nd(next_qs, tf.stack([tf.range(len(next_actions)), next_actions], axis=1))
 
         # Ground qs with reward and value trajectory
@@ -126,7 +148,11 @@ class RLAgent:
         target_qs = tf.tensor_scatter_nd_update(qs, actions_indices, targets)
 
         # Fit
-        history = self.model.fit(states, target_qs, batch_size=self.batch_size, epochs=1, verbose=0)
+        with tf.GradientTape() as tape:
+            predictions = self.model(states, training=True)
+            loss = mean_squared_error(target_qs, predictions)
+        gradients = tape.gradient(loss, self.model.trainable_variables)
+        self.model.optimizer.apply_gradients(zip(gradients, self.model.trainable_variables))
 
         # Log
         if self.tensorboard:
@@ -135,9 +161,10 @@ class RLAgent:
             with self.tensorboard.as_default():
                 # Grouped cards
                 tf.summary.histogram('Training Metrics/action_hist', actions, step=step)
-                tf.summary.scalar('Training Metrics/batch_loss', history.history['loss'][0], step=step)
+                tf.summary.scalar('Training Metrics/batch_loss', tf.reduce_mean(loss), step=step)
                 tf.summary.scalar('Training Metrics/avg_reward', tf.reduce_mean(rewards), step=step)
-                current_lr = self.model.optimizer.learning_rate.numpy()
+                tf.summary.scalar('Training Metrics/epsilon', self.epsilon, step=step)
+                current_lr = self.model.optimizer.learning_rate
                 tf.summary.scalar('Training Metrics/learning_rate', current_lr, step=step)
                 legal_qs = tf.where(tf.math.is_finite(qs), qs, tf.zeros_like(qs))
                 tf.summary.scalar('Training Metrics/avg_q', tf.reduce_mean(legal_qs), step=step)
@@ -145,10 +172,12 @@ class RLAgent:
                 # Weights
                 for layer in self.model.layers:
                     if hasattr(layer, 'kernel') and layer.kernel is not None:
-                        weights = layer.get_weights()[0]
+                        weights = layer.kernel
                         tf.summary.histogram('Model Weights/'+ layer.name +'_weights', weights, step=step)
 
     def replay(self):
+        """Standard replay function used in off-policy RL
+        """
         batch = sample(self.memory, self.batch_size)
         self._batch_train(batch)
         
@@ -163,3 +192,4 @@ class RLAgent:
         model_path = os.path.join(base_path, 'model.keras')
         self.model.save(model_path)
         print(f"Saved the model at {model_path}")
+        

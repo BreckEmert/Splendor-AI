@@ -2,13 +2,13 @@
 
 import numpy as np
 
-from Environment.Splendor_components.Board_components.board import Board # type: ignore
-from Environment.Splendor_components.Player_components.player import Player # type: ignore
+from Environment.Splendor_components.Board_components.board import Board  # type: ignore
+from Environment.Splendor_components.Player_components.player import Player  # type: ignore
 
 
 class Game:
     def __init__(self, players):
-        self.players: list = [Player(name, rl_model) for name, rl_model in players]
+        self.players = [Player(name, rl_model) for name, rl_model in players]
         self.reset()
 
     def reset(self):
@@ -76,29 +76,33 @@ class Game:
                 if sum(player.gems) < 10:
                     player.gems[5] += gold
                 else:
-                    discard, _ = player.choose_discard(self.to_vector(), player.gems, reward=-1/30)
+                    discard, _ = player.choose_discard(
+                        self.to_vector(), player.gems, reward=-1/30)
                     player.take_or_spend_gems(discard)
                     player.gems[5] += gold
-            case 'reserve top': # OTHER PLAYERS CAN'T ACTUALLY SEE THIS CARD
+            case 'reserve top':  # OTHER PLAYERS CAN'T ACTUALLY SEE THIS CARD
                 reserved_card, gold = board.reserve_from_deck(tier)
                 player.reserved_cards.append(reserved_card)
 
                 if sum(player.gems) < 10:
                     player.gems[5] += gold
                 else:
-                    discard, _ = player.choose_discard(self.to_vector(), player.gems, reward=-1/30)
+                    discard, _ = player.choose_discard(
+                        self.to_vector(), player.gems, reward=-1/30)
                     player.take_or_spend_gems(discard)
                     player.gems[5] += gold
 
     def get_state(self):
         return {
             'board': self.board.get_state(),
-            'players': {player.name: player.get_state() for player in self.players},
-            'current_half_turn': self.half_turns
+            'players': {player.name: player.get_state() 
+                        for player in self.players}
         }
 
     def to_vector(self):
-        board_vector = self.board.to_vector() # length 150 !change player.state_offset if this changes!
-        active_player = self.active_player.to_vector() # length 46
-        enemy_player = self.players[(self.half_turns+1) % 2].to_vector() # length 46
-        return np.concatenate((board_vector, active_player, [0.0], enemy_player)).astype(np.float32)
+        board_vector = self.board.to_vector()  # length 150, change player.state_offset if this changes
+        active_player = self.active_player.to_vector()  # length 46
+        enemy_player = self.players[(self.half_turns+1) % 2].to_vector()  # length 46
+        return np.concatenate((
+            board_vector, active_player, [0.0], enemy_player
+        )).astype(np.float32)
