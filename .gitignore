@@ -1,10 +1,8 @@
 
 *.pyc
-/Splendor/RL/Trained Agents
 /Splendor/Environment/Splendor_components/Board_components/__pycache__
-/Splendor/meta
 /Splendor/RL/trained_agents
-/Splendor/meta
+/Splendor/meta/images_backup
 Splendor/states.csv
 Splendor/next_states.csv
 *.pkl
