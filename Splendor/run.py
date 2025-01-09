@@ -2,36 +2,51 @@
 
 import os
 import sys
-
 from datetime import datetime, timedelta
 
-sys.path.append(os.path.abspath(os.path.dirname(__file__)))
+# sys.path.append(os.path.abspath(os.path.dirname(__file__)))
 from RL import ddqn_loop, debug_game, find_fastest_game  # type: ignore
 
 
-if __name__ == "__main__":
-    log_path = "/workspace/RL/trained_agents/game_logs"
-    time = (datetime.now() - timedelta(hours=5)).strftime("%m%d-%H%M")
-    tensorboard_dir = os.path.join(log_path, "tensorboard_logs", time)
-    nickname = "ffn_pos_sumgems"
-    # layer_sizes = [256, 128, 256, 128]
-    # Previous1 [256, 64, 256, 64]
-    # layer_sizes = [128, 64, 128, 64]  # For regular training
-    layer_sizes = [64]
-
-    base_dir = os.getenv('WORKSPACE_DIR', os.path.dirname(os.path.abspath(__file__)))
-    layer_sizes_str = "_".join(map(str, layer_sizes))
-    model_path = os.path.join(base_dir, "RL", "trained_agents", nickname, layer_sizes_str)
-    from_model_path = os.path.join(model_path, "model.keras")
-
-    # memory_path = "/workspace/RL/random_memory.pkl"
-    memory_path = "/workspace/RL/memory.pkl"
+def main():
+    # Establish some paths
+    backup_dir = os.path.dirname(os.path.abspath(__file__))
+    base_dir = os.getenv('WORKSPACE_DIR', backup_dir)
     
-    ddqn_loop(model_path=model_path, 
-              from_model_path = from_model_path,  # do not run without deleting line 194 player.py
-              layer_sizes=layer_sizes, 
-              memory_path=memory_path, 
-              log_path=log_path, 
-              tensorboard_dir=tensorboard_dir)
+    # Set the RL model layer sizes
+    layer_sizes = [64]
+    layer_sizes_str = "_".join(map(str, layer_sizes))
+    nickname = layer_sizes_str
+    
+    # Model and memory paths
+    agent_path = os.path.join(base_dir, "RL", "trained_agents")
+    model_from_path = os.path.join(agent_path, "model.keras")  # (changeable)
+    model_save_path = os.path.join(agent_path, nickname, layer_sizes_str)
+
+    log_dir = os.path.join(agent_path, "game_logs")
+    time = (datetime.now() - timedelta(hours=5)).strftime("%m%d-%H%M")
+    tensorboard_dir = os.path.join(log_dir, "tensorboard_logs", time)
+
+    # Print paths
+    print(f"Base directory: {base_dir}")
+    print(f"Log directory: {log_dir}")
+    print(f"Model save path: {model_save_path}")
+    print(f"Preexisting model path: ", model_from_path)
+    print(f"Tensorboard directory: {tensorboard_dir}")
+
+
+    # Function calls
+    # ddqn_loop(model_save_path=model_save_path, 
+    #           model_from_path=None, 
+    #           layer_sizes=layer_sizes, 
+    #           preexisting_memory=None, 
+    #           log_path=log_path, 
+    #           tensorboard_dir=tensorboard_dir)
     # debug_game(layer_sizes=layer_sizes, memory_path=None, log_path=log_path)
-    # find_fastest_game(memory_path=memory_path) f# uncomment line 194
+    find_fastest_game(base_dir, append_to_prev_mem=True)  # Ensure line 196 in player.py is uncommented
+
+
+if __name__ == "__main__":
+    # Need to go through and make sure .copy() and .deepcopy() are fully utilized
+    # Just fixed two so there are probably more
+    main()

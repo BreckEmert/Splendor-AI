@@ -24,7 +24,10 @@ class Player:
         if len(gems_to_change) < 6:
             gems_to_change = np.pad(gems_to_change, (0, 6-len(gems_to_change)))
         self.gems += gems_to_change
-        assert np.all(self.gems >= 0) and sum(self.gems) <= 10, f"Illegal player gems {self.gems}, {gems_to_change}"
+
+        # Validate gem counts
+        assert np.all(self.gems >= 0), f"Illegal player gems: {self.gems}, {gems_to_change}"
+        assert sum(self.gems) <= 10, f"Illegal player gems: {self.gems}, {gems_to_change}"
 
     def get_bought_card(self, card):
         self.cards[card.gem] += 1
@@ -49,7 +52,8 @@ class Player:
         next_state = state.copy()
         next_state[gem_index+self.state_offset] -= 0.25
         state[196] = 0.2*progress  # 0.2 * (moves remaining+1), indicating progression through loop
-        self.model.remember([state.copy(), move_index, reward, next_state.copy(), 1], legal_mask.copy())
+        memory = [state.copy(), move_index, reward, next_state.copy(), 1]
+        self.model.remember(memory, legal_mask.copy())
 
         # Update player in the game state (not board anymore)
         state = next_state.copy() # Do we need to do .copy()
@@ -73,7 +77,8 @@ class Player:
         next_state = state.copy()
         next_state[take_index+self.state_offset] += 0.25
         state[196] = progress  # 0.2 * (moves remaining+1), indicating progression through loop
-        self.model.remember([state.copy(), take_index, reward, next_state.copy(), 1], legal_mask.copy())
+        memory = [state.copy(), take_index, reward, next_state.copy(), 1]
+        self.model.remember(memory, legal_mask.copy())
 
         return take, next_state
 
@@ -92,24 +97,27 @@ class Player:
         # Perform the move that was initially chosen
         if move_index:
             if move_index < 5:
-                chosen_gem, state = self.choose_take(state, board_gems, 0.6, 0.0, move_index)
+                chosen_gem, state = self.choose_take(
+                    state, board_gems, 0.6, 0.0, move_index)
                 takes -= 1
             else:
-                chosen_gem, state = self.choose_discard(state, self.gems, 0.6, discard_reward, move_index)
+                chosen_gem, state = self.choose_discard(
+                    state, self.gems, 0.6, discard_reward, move_index)
                 discards -= 1
             chosen_gems += chosen_gem
 
         # Choose necessary discards
         while discards > 0:
-            discard, state = self.choose_discard(state, player_gems+chosen_gems, 
-                                                 progress=discards, reward=discard_reward)
+            discard, state = self.choose_discard(
+                state, player_gems+chosen_gems, progress=discards, reward=discard_reward)
             # discard_reward = 0.0
             chosen_gems += discard
             discards -= 1
         
         # Choose necessary takes
         while takes > 0:
-            take, state = self.choose_take(state, board_gems-chosen_gems, progress=takes, reward=-1/30)
+            take, state = self.choose_take(
+                state, board_gems-chosen_gems, progress=takes, reward=-1/30)
             chosen_gems += take
             takes -= 1
 
@@ -139,7 +147,8 @@ class Player:
             # Remember
             next_state = state.copy()
             next_state[gem_index+self.state_offset] -= 0.25
-            self.model.remember([state.copy(), move_index, 1/30, next_state.copy(), 1], legal_mask.copy())
+            memory = [state.copy(), move_index, 1/30, next_state.copy(), 1]
+            self.model.remember(memory, legal_mask.copy())
 
             # Update player in game state
             state = next_state.copy()
@@ -193,8 +202,8 @@ class Player:
             elif can_afford_with_gold:
                 legal_moves.append(('buy reserved with gold', (None, card_index)))
 
-        # if len(legal_moves) > 0:
-        #     return legal_moves
+        if len(legal_moves) > 0:
+            return legal_moves
         
         # Take gems
         if sum(self.gems) < 10:
@@ -260,7 +269,8 @@ class Player:
                 gem_index = move_index % 5
                 next_state = state.copy()
                 next_state[gem_index+self.state_offset] += 0.5
-                self.model.remember([state.copy(), move_index, -1/30, next_state.copy(), 1], legal_mask.copy())
+                memory = [state.copy(), move_index, -1/30, next_state.copy(), 1]
+                self.model.remember(memory, legal_mask.copy())
 
                 chosen_gems = np.zeros(6, dtype=int)
                 chosen_gems[gem_index] = 2
@@ -284,7 +294,8 @@ class Player:
 
             if self.points+points >= 15:
                 reward += 10
-                self.model.remember([state.copy(), move_index, reward, state.copy(), 0], legal_mask.copy())
+                memory = [state.copy(), move_index, reward, state.copy(), 0]
+                self.model.remember(memory, legal_mask.copy())
                 self.model.memory[-1].append(legal_mask.copy())
                 self.victor = True
                 return None
@@ -292,7 +303,8 @@ class Player:
             next_state = state.copy()
             offset = 11 * (4*tier + card_index)
             next_state[offset:offset+11] = board.deck_mapping[tier].peek_vector()
-            self.model.remember([state.copy(), move_index, reward, next_state.copy(), 1], legal_mask.copy())
+            memory = [state.copy(), move_index, reward, next_state.copy(), 1]
+            self.model.remember(memory, legal_mask.copy())
             
             if move_index < 27:
                 move = ('buy', (tier, card_index))
@@ -319,7 +331,8 @@ class Player:
             next_state = state.copy()
             next_state[offset:offset+11] = board.deck_mapping[tier].peek_vector()
             reward = 0.0 if sum(self.gems) < 10 else 0.0
-            self.model.remember([state.copy(), move_index, reward, next_state.copy(), 1], legal_mask.copy())
+            memory = [state.copy(), move_index, reward, next_state.copy(), 1]
+            self.model.remember(memory, legal_mask.copy())
 
         return move
     

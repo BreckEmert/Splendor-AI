@@ -1,39 +1,43 @@
 # Splendor/RL/model.py
 
 import os
+import pickle
 from collections import deque
+from copy import deepcopy
 from random import sample
-
 import numpy as np
+
 import tensorflow as tf
-from keras.config import enable_unsafe_deserialization
-from keras.layers import Input, Dense, Concatenate, Lambda, LeakyReLU, BatchNormalization
-from keras.losses import mean_squared_error
-from keras.models import load_model
-from keras.initializers import GlorotNormal, HeNormal
-from keras.optimizers import Adam
-from keras.optimizers.schedules import ExponentialDecay
-from keras.regularizers import l2
+from keras.config import enable_unsafe_deserialization                                      # type: ignore
+from keras.layers import Input, Dense, Concatenate, Lambda, LeakyReLU, BatchNormalization   # type: ignore
+from keras.losses import mean_squared_error                                                 # type: ignore
+from keras.models import load_model                                                         # type: ignore
+from keras.initializers import GlorotNormal, HeNormal                                       # type: ignore
+from keras.optimizers import Adam                                                           # type: ignore
+from keras.optimizers.schedules import ExponentialDecay                                     # type: ignore
+from keras.regularizers import l2                                                           # type: ignore
 
 
 class RLAgent:
-    def __init__(self, model_path=None, from_model_path=None, layer_sizes=None, memory_path=None, tensorboard_dir=None):
+    def __init__(self, model_save_path=None, model_from_path=None, 
+                 layer_sizes=None, preexisting_memory=None, tensorboard_dir=None):
+        print("Making a new RLAgent.")
         enable_unsafe_deserialization()
         self.state_size = 243
         self.action_size = 61
 
-        self.memory = self.load_memory(memory_path)
+        self.memory = self.load_memory(preexisting_memory)
         self.batch_size = 128
 
-        self.gamma = 0.99  # 0.1**(1/25)
+        self.gamma = 0.1  # 0.1**(1/25)
         self.epsilon = 1.0
         self.epsilon_min = 0.04
         self.epsilon_decay = 0.995
         self.lr = 0.01
 
-        if from_model_path:
-            self.model = load_model(from_model_path)
-            self.target_model = load_model(from_model_path)
+        if model_from_path:
+            self.model = load_model(model_from_path)
+            self.target_model = load_model(model_from_path)
 
         else:
             print("Building a new model")
@@ -70,14 +74,35 @@ class RLAgent:
     
     def load_memory(self, memory_path):
         if memory_path:
-            import pickle
             with open(memory_path, 'rb') as f:
                 flattened_memory = pickle.load(f)
             loaded_memory = [mem for mem in flattened_memory]
             print(f"Loading {len(loaded_memory)} memories")
         else:
-            loaded_memory = [[0, 0, 0, 0, 0]]
+            # Should be run with preexisting memory from training.find_fastest_game
+            # because this memory is bad
+            dummy_state = np.zeros(self.state_size, dtype=np.float32)
+            dummy_mask = np.ones(self.action_size, dtype=bool)
+            loaded_memory = [[dummy_state, 1, 1, dummy_state, 1, dummy_mask]]
         return deque(loaded_memory, maxlen=50_000)
+    
+    def write_memory(memory, append_to_previous=False):
+        memory_path = "/workspace/RL/memory.pkl"
+
+        # Get the old memories if we don't want to overwrite them
+        if append_to_previous:
+            with open(memory_path, 'rb') as f:
+                existing_memory = pickle.load(f)
+            print(f"Loaded {len(existing_memory)} existing memories.")
+            existing_memory.extend(memory)
+            memory = existing_memory
+
+        # Write out the memories
+        with open(memory_path, 'wb') as f:
+            pickle.dump(memory, f)
+
+        print(f"Wrote {len(memory)} memories to {memory_path}")
+        print("Absolute memory path: ", os.path.abspath(memory_path))
 
     def update_target_model(self):
         self.target_model.set_weights(self.model.get_weights())
@@ -93,9 +118,8 @@ class RLAgent:
         return tf.where(legal_mask, qs, tf.fill(qs.shape, -tf.float32.max))
 
     def remember(self, memory, legal_mask):
-        # assert memory[2] >= 0, f'Reward is {memory[2]}'
-        self.memory.append(memory)
-        self.memory[-2].append(legal_mask)
+        self.memory.append(deepcopy(memory))
+        self.memory[-2].append(legal_mask.copy())
 
     @tf.function
     def _batch_train(self, batch):
@@ -105,8 +129,6 @@ class RLAgent:
         next_states = tf.convert_to_tensor([mem[3] for mem in batch], dtype=tf.float32)
         dones = tf.convert_to_tensor([mem[4] for mem in batch], dtype=tf.float32)
         legal_masks = tf.convert_to_tensor([mem[5] for mem in batch], dtype=tf.bool)
-
-        # assert np.all(rewards >= 0), 'rewards are lt 0'
 
         # Calculate this turn's qs with primary model
         qs = self.model(states, training=False)
@@ -154,6 +176,8 @@ class RLAgent:
                         tf.summary.histogram('Model Weights/'+ layer.name +'_weights', weights, step=step)
 
     def replay(self):
+        """Standard replay function used in off-policy RL
+        """
         batch = sample(self.memory, self.batch_size)
         self._batch_train(batch)
         
