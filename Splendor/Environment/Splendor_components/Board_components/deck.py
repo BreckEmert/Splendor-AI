@@ -1,5 +1,5 @@
 # Splendor/Environment/Splendor_components/Board_components/deck.py
-
+import os
 import random
 
 import numpy as np
@@ -31,7 +31,10 @@ class Deck:
         self.cards = self.load_deck()
 
     def load_deck(self):
-        path = '/workspace/Environment/Splendor_components/Board_components/Splendor_cards_numeric.xlsx'
+        workspace_dir = os.getenv('WORKSPACE_DIR', os.path.dirname(os.path.abspath(__file__)))
+        path = os.path.join(workspace_dir, "Splendor_cards_numeric.xlsx")
+
+        # path = '/workspace/Environment/Splendor_components/Board_components/Splendor_cards_numeric.xlsx'
         deck = pd.read_excel(path, sheet_name=self.tier)
 
         cards = [
