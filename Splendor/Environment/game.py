@@ -95,14 +95,14 @@ class Game:
     def get_state(self):
         return {
             'board': self.board.get_state(),
-            'players': {player.name: player.get_state() 
-                        for player in self.players}
+            'players': {player.name: player.get_state() for player in self.players}
         }
 
     def to_vector(self):
         board_vector = self.board.to_vector()  # length 150, change player.state_offset if this changes
         active_player = self.active_player.to_vector()  # length 46
         enemy_player = self.players[(self.half_turns+1) % 2].to_vector()  # length 46
-        return np.concatenate((
-            board_vector, active_player, [0.0], enemy_player
-        )).astype(np.float32)
+
+        vector = np.concatenate((board_vector, active_player, [0.0], enemy_player))
+        return vector.astype(np.float32)
+    

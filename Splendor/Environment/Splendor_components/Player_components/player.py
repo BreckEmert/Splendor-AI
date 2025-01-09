@@ -18,7 +18,7 @@ class Player:
         self.card_ids: list = [[[], [], [], [], []], [[], [], [], [], []], 
                                [[], [], [], [], []], [[], [], [], [], []]]
         self.victor: bool = False
-        self.move_index = 9999
+        self.move_index: int = 9999  # Set to impossible to avoid confusion
 
     def take_or_spend_gems(self, gems_to_change):
         if len(gems_to_change) < 6:
@@ -53,10 +53,10 @@ class Player:
         next_state[gem_index+self.state_offset] -= 0.25
         state[196] = 0.2*progress  # 0.2 * (moves remaining+1), indicating progression through loop
         memory = [state.copy(), move_index, reward, next_state.copy(), 1]
-        self.model.remember(memory, legal_mask.copy())
+        self.model._remember(memory, legal_mask.copy())
 
-        # Update player in the game state (not board anymore)
-        state = next_state.copy() # Do we need to do .copy()
+        # Update player in the game state
+        state = next_state.copy()
 
         return discard, state
     
@@ -78,7 +78,7 @@ class Player:
         next_state[take_index+self.state_offset] += 0.25
         state[196] = progress  # 0.2 * (moves remaining+1), indicating progression through loop
         memory = [state.copy(), take_index, reward, next_state.copy(), 1]
-        self.model.remember(memory, legal_mask.copy())
+        self.model._remember(memory, legal_mask.copy())
 
         return take, next_state
 
@@ -148,7 +148,7 @@ class Player:
             next_state = state.copy()
             next_state[gem_index+self.state_offset] -= 0.25
             memory = [state.copy(), move_index, 1/30, next_state.copy(), 1]
-            self.model.remember(memory, legal_mask.copy())
+            self.model._remember(memory, legal_mask.copy())
 
             # Update player in game state
             state = next_state.copy()
@@ -270,7 +270,7 @@ class Player:
                 next_state = state.copy()
                 next_state[gem_index+self.state_offset] += 0.5
                 memory = [state.copy(), move_index, -1/30, next_state.copy(), 1]
-                self.model.remember(memory, legal_mask.copy())
+                self.model._remember(memory, legal_mask.copy())
 
                 chosen_gems = np.zeros(6, dtype=int)
                 chosen_gems[gem_index] = 2
@@ -295,7 +295,7 @@ class Player:
             if self.points+points >= 15:
                 reward += 10
                 memory = [state.copy(), move_index, reward, state.copy(), 0]
-                self.model.remember(memory, legal_mask.copy())
+                self.model._remember(memory, legal_mask.copy())
                 self.model.memory[-1].append(legal_mask.copy())
                 self.victor = True
                 return None
@@ -304,7 +304,7 @@ class Player:
             offset = 11 * (4*tier + card_index)
             next_state[offset:offset+11] = board.deck_mapping[tier].peek_vector()
             memory = [state.copy(), move_index, reward, next_state.copy(), 1]
-            self.model.remember(memory, legal_mask.copy())
+            self.model._remember(memory, legal_mask.copy())
             
             if move_index < 27:
                 move = ('buy', (tier, card_index))
@@ -332,7 +332,7 @@ class Player:
             next_state[offset:offset+11] = board.deck_mapping[tier].peek_vector()
             reward = 0.0 if sum(self.gems) < 10 else 0.0
             memory = [state.copy(), move_index, reward, next_state.copy(), 1]
-            self.model.remember(memory, legal_mask.copy())
+            self.model._remember(memory, legal_mask.copy())
 
         return move
     

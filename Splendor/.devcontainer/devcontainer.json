@@ -4,9 +4,7 @@
     "build": {
         "dockerfile": "Dockerfile",
         "context": ".",
-        "args": {
-            // None
-        }
+        "args": {}
     },
     "runArgs": [
         "--gpus", "all",
@@ -16,7 +14,8 @@
         "--net=host"
     ],
     "workspaceFolder": "/workspace",
-    "workspaceMount": "source=${localWorkspaceFolder},target=/workspace,type=bind,consistency=cached",
+    // "workspaceMount": "source=${localWorkspaceFolder},target=/workspace,type=bind,consistency=cached",
+    "workspaceMount": "source=/host_mnt/c/Program Files/Coding Programs/GitHub/Splendor-AI/Splendor,target=/workspace,type=bind,consistency=cached", 
     "customizations": {
         "vscode": {
             "settings": { 
@@ -27,5 +26,6 @@
                 "xyz.local-history"
             ]
         }
-    }
+    }, 
+    "remoteUser": "myuser"
 }
