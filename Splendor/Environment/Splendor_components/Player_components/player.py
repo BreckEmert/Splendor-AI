@@ -18,7 +18,7 @@ class Player:
         self.card_ids: list = [[[], [], [], [], []], [[], [], [], [], []], 
                                [[], [], [], [], []], [[], [], [], [], []]]
         self.victor: bool = False
-        self.move_index = 9999
+        self.move_index: int = 9999  # Set to impossible to avoid confusion
 
     def take_or_spend_gems(self, gems_to_change):
         if len(gems_to_change) < 6:
@@ -55,8 +55,8 @@ class Player:
         memory = [state.copy(), move_index, reward, next_state.copy(), 1]
         self.model.remember(memory, legal_mask.copy())
 
-        # Update player in the game state (not board anymore)
-        state = next_state.copy() # Do we need to do .copy()
+        # Update player in the game state
+        state = next_state.copy()
 
         return discard, state
     
@@ -202,8 +202,8 @@ class Player:
             elif can_afford_with_gold:
                 legal_moves.append(('buy reserved with gold', (None, card_index)))
 
-        if len(legal_moves) > 0:
-            return legal_moves
+        # if len(legal_moves) > 0:
+        #     return legal_moves
         
         # Take gems
         if sum(self.gems) < 10:

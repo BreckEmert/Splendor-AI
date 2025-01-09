@@ -19,15 +19,15 @@ from keras.regularizers import l2                                               
 
 
 class RLAgent:
-    def __init__(self, model_save_path=None, model_from_path=None, 
-                 layer_sizes=None, preexisting_memory=None, tensorboard_dir=None):
+    def __init__(self, model_save_path=None, model_from_path=None, layer_sizes=None, 
+                 preexisting_memory_path=None, tensorboard_dir=None):
         print("Making a new RLAgent.")
         enable_unsafe_deserialization()
         self.state_size = 243
         self.action_size = 61
-
-        self.memory = self.load_memory(preexisting_memory)
         self.batch_size = 128
+
+        self.memory = self.load_memory(preexisting_memory_path)
 
         self.gamma = 0.1  # 0.1**(1/25)
         self.epsilon = 1.0
@@ -38,7 +38,6 @@ class RLAgent:
         if model_from_path:
             self.model = load_model(model_from_path)
             self.target_model = load_model(model_from_path)
-
         else:
             print("Building a new model")
             self.model = self._build_model(layer_sizes)
@@ -86,7 +85,7 @@ class RLAgent:
             loaded_memory = [[dummy_state, 1, 1, dummy_state, 1, dummy_mask]]
         return deque(loaded_memory, maxlen=50_000)
     
-    def write_memory(memory, append_to_previous=False):
+    def write_memory(self, append_to_previous=False):
         memory_path = "/workspace/RL/memory.pkl"
 
         # Get the old memories if we don't want to overwrite them
@@ -94,10 +93,15 @@ class RLAgent:
             with open(memory_path, 'rb') as f:
                 existing_memory = pickle.load(f)
             print(f"Loaded {len(existing_memory)} existing memories.")
-            existing_memory.extend(memory)
+            existing_memory.extend(self.memory)
             memory = existing_memory
+        else:
+            memory = self.memory
 
         # Write out the memories
+        # for mem in memory:
+        #     print(mem)
+
         with open(memory_path, 'wb') as f:
             pickle.dump(memory, f)
 
