@@ -1,10 +1,8 @@
 # Splendor/run.py
 
 import os
-import sys
 from datetime import datetime, timedelta
 
-# sys.path.append(os.path.abspath(os.path.dirname(__file__)))
 from RL import ddqn_loop, debug_game, find_fastest_game  # type: ignore
 
 

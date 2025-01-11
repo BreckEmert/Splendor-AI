@@ -13,3 +13,15 @@ RUN pip install --no-cache-dir numpy pandas scipy openpyxl pillow
 RUN apt-get update && apt-get install -y \
     fontconfig \
     && fc-cache -f -v
+
+
+# Create a non-root user and set permissions
+RUN useradd -m -s /bin/bash myuser && \
+    mkdir -p /workspace && \
+    chown -R myuser:myuser /workspace
+
+# Switch to the non-root user
+USER myuser
+
+# Set the working directory for the user
+WORKDIR /workspace
