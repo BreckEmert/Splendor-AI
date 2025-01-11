@@ -8,31 +8,54 @@ from datetime import datetime, timedelta
 from RL import ddqn_loop, debug_game, find_fastest_game  # type: ignore
 
 
-def get_paths(layer_sizes):
+def get_paths(layer_sizes, model_from_name, memory_buffer_name):
     backup_dir = os.path.dirname(os.path.abspath(__file__))
     base_dir = os.getenv('WORKSPACE_DIR', backup_dir)
-    agent_dir = os.path.join(base_dir, "RL", "trained_agents")
+    rl_dir = os.path.join(base_dir, "RL")
+    trained_agents_dir = os.path.join(rl_dir, "trained_agents")
+    saved_files_dir = os.path.join(rl_dir, "saved_files")
+
     nickname = "_".join(map(str, layer_sizes))
+    if model_from_name:
+        model_from_path = os.path.join(trained_agents_dir, model_from_name)
+        assert os.path.exists(model_from_path), f"{model_from_path} doesn't exist."
+    else:
+        model_from_path = None
+    if memory_buffer_name:
+        memory_buffer_path = os.path.join(saved_files_dir, memory_buffer_name)
+    else:
+        memory_buffer_path = None
 
-    model_save_path = os.path.join(agent_dir, nickname)
-    log_dir = os.path.join(agent_dir, "game_logs")
-    tensorboard_dir = os.path.join(agent_dir, "tensorboard_logs", nickname)
+    paths = {
+        "base_dir": base_dir, 
+        "layer_sizes": layer_sizes,
+        "model_from_path": model_from_path, 
+        "model_save_path": os.path.join(trained_agents_dir, nickname), 
+        "memory_buffer_path": memory_buffer_path, 
+        "rl_dir": rl_dir, 
+        "saved_files_dir": saved_files_dir, 
+        "log_dir": os.path.join(saved_files_dir, "game_logs"), 
+        "states_log_dir": os.path.join(saved_files_dir, "game_states", nickname), 
+        "tensorboard_dir": os.path.join(saved_files_dir, "tensorboard_logs", nickname)
+    }
 
-    return (model_save_path, log_dir, tensorboard_dir)
+    for key, path in paths.items():
+        if key.endswith("_dir") or key == "model_save_path":
+            os.makedirs(path, exist_ok=True)
+
+    return paths
 
 def main():
     layer_sizes = [64]
-    model_save_path, log_dir, tensorboard_dir = get_paths(layer_sizes)
+    model_from_name = None  # "64_32.keras"
+    memory_buffer = None  # "random_memory.pkl"
+    paths = get_paths(layer_sizes, model_from_name, memory_buffer)
 
     # Function calls
-    ddqn_loop(model_save_path = model_save_path, 
-              preexisting_model_path = None, 
-              layer_sizes = layer_sizes,  # model.py may need to be updated
-              preexisting_memory = "random_memory.pkl",  # [None, random_memory.pkl, memory.pkl]
-              log_dir = log_dir, 
-              tensorboard_dir = tensorboard_dir)
-    # debug_game(layer_sizes=layer_sizes, memory_path=None, log_path=log_path)
-    # find_fastest_game(log_dir, append_to_prev_mem=True, base_dir)  # Ensure line 205 in player.py is uncommented
+    # ddqn_loop(paths, memory_buffer="random", log_rate=10)
+    # debug_game(paths, memory_buffer=None)
+    find_fastest_game(paths, n_games=2, log_states=True, append_to_prev_mem=False)  
+        # !Uncomment line 205 in player.py!
 
 
 if __name__ == "__main__":
