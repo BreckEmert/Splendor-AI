@@ -19,16 +19,9 @@ class RandomAgent:
         loaded_memory = [[dummy_state, 0, 0, dummy_state, 1, dummy_mask]]
         return deque(loaded_memory, maxlen=50_000)
     
-    def write_memory(self, memory, base_dir, append_to_prev_mem):
-        memory_path = os.path.join(base_dir, "RL", "random_memory.pkl")
-
-        # Get the old memories if we don't want to overwrite them
-        if append_to_prev_mem:
-            with open(memory_path, 'rb') as f:
-                existing_memory = pickle.load(f)
-            print(f"Loaded {len(existing_memory)} existing memories.")
-            existing_memory.extend(memory)
-            memory = existing_memory
+    def write_memory(self, memory):
+        saved_files_dir = self.paths['saved_files_dir']
+        memory_path = os.path.join(saved_files_dir, "random_memory.pkl")
 
         # Write out the memories
         with open(memory_path, 'wb') as f:
