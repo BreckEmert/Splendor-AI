@@ -1,5 +1,6 @@
 # Splendor/Environment/Splendor_components/player.py
 
+import copy
 import numpy as np
 
 
@@ -8,10 +9,11 @@ class Player:
         self.name: str = name
         self.model = model
         self.state_offset: int = 150
+        self.reset()
     
     def reset(self):
-        self.gems: np.ndarray = np.zeros(6, dtype=int)
-        self.cards: np.ndarray = np.zeros(5, dtype=int)
+        self.gems: np.ndarray = np.zeros(6, dtype=int)  # Gold gem so 6
+        self.cards: np.ndarray = np.zeros(5, dtype=int)  # No gold card so 5
         self.reserved_cards: list = []
         self.points: int = 0
 
@@ -53,13 +55,13 @@ class Player:
         next_state[gem_index+self.state_offset] -= 0.25
         state[196] = 0.2*progress  # 0.2 * (moves remaining+1), indicating progression through loop
         memory = [state.copy(), move_index, reward, next_state.copy(), 1]
-        self.model._remember(memory, legal_mask.copy())
+        self.model.remember(memory, legal_mask.copy())
 
         # Update player in the game state
         state = next_state.copy()
 
         return discard, state
-    
+
     def choose_take(self, state, available_gems, progress, reward=0.0, take_index=None):
         # Set legal mask to only legal takes
         legal_mask = np.zeros(61, dtype=bool)
@@ -78,7 +80,7 @@ class Player:
         next_state[take_index+self.state_offset] += 0.25
         state[196] = progress  # 0.2 * (moves remaining+1), indicating progression through loop
         memory = [state.copy(), take_index, reward, next_state.copy(), 1]
-        self.model._remember(memory, legal_mask.copy())
+        self.model.remember(memory, legal_mask.copy())
 
         return take, next_state
 
@@ -148,7 +150,7 @@ class Player:
             next_state = state.copy()
             next_state[gem_index+self.state_offset] -= 0.25
             memory = [state.copy(), move_index, 1/30, next_state.copy(), 1]
-            self.model._remember(memory, legal_mask.copy())
+            self.model.remember(memory, legal_mask.copy())
 
             # Update player in game state
             state = next_state.copy()
@@ -228,7 +230,7 @@ class Player:
                     legal_moves.append(('reserve top', (tier_index, None)))
         
         return legal_moves
-    
+
     def legal_to_vector(self, legal_moves):
         legal_mask = np.zeros(61, dtype=bool)
         for move, details in legal_moves:
@@ -256,7 +258,7 @@ class Player:
                     legal_mask[57 + tier] = True
 
         return legal_mask
-    
+
     def vector_to_details(self, state, board, legal_mask, move_index):
         tier = move_index % 15 // 4
         card_index = move_index % 15 % 4
@@ -270,7 +272,7 @@ class Player:
                 next_state = state.copy()
                 next_state[gem_index+self.state_offset] += 0.5
                 memory = [state.copy(), move_index, -1/30, next_state.copy(), 1]
-                self.model._remember(memory, legal_mask.copy())
+                self.model.remember(memory, legal_mask.copy())
 
                 chosen_gems = np.zeros(6, dtype=int)
                 chosen_gems[gem_index] = 2
@@ -295,7 +297,7 @@ class Player:
             if self.points+points >= 15:
                 reward += 10
                 memory = [state.copy(), move_index, reward, state.copy(), 0]
-                self.model._remember(memory, legal_mask.copy())
+                self.model.remember(memory, legal_mask.copy())
                 self.model.memory[-1].append(legal_mask.copy())
                 self.victor = True
                 return None
@@ -304,7 +306,7 @@ class Player:
             offset = 11 * (4*tier + card_index)
             next_state[offset:offset+11] = board.deck_mapping[tier].peek_vector()
             memory = [state.copy(), move_index, reward, next_state.copy(), 1]
-            self.model._remember(memory, legal_mask.copy())
+            self.model.remember(memory, legal_mask.copy())
             
             if move_index < 27:
                 move = ('buy', (tier, card_index))
@@ -332,10 +334,10 @@ class Player:
             next_state[offset:offset+11] = board.deck_mapping[tier].peek_vector()
             reward = 0.0 if sum(self.gems) < 10 else 0.0
             memory = [state.copy(), move_index, reward, next_state.copy(), 1]
-            self.model._remember(memory, legal_mask.copy())
+            self.model.remember(memory, legal_mask.copy())
 
         return move
-    
+
     def choose_move(self, board, state):
         legal_moves = self.get_legal_moves(board)
         legal_mask = self.legal_to_vector(legal_moves)
@@ -343,7 +345,7 @@ class Player:
         
         self.move_index = np.argmax(rl_moves)
         return self.vector_to_details(state, board, legal_mask, self.move_index)
-    
+
     def check_noble_visit(self, board):
         for index, noble in enumerate(board.cards[3]):
             if noble and np.all(self.cards >= noble.cost):
@@ -353,13 +355,13 @@ class Player:
         return False
 
     def get_state(self):
-        chosen_move = int(self.move_index)
-        self.move_index = 9999
+        # chosen_move = int(self.move_index)
+        # self.move_index = 9999
         return {
             'gems': self.gems.tolist(), 
-            'cards': self.card_ids, 
+            'cards': copy.deepcopy(self.card_ids), 
             'reserved_cards': [(card.tier, card.id) for card in self.reserved_cards], 
-            'chosen_move': chosen_move, 
+            'chosen_move': int(self.move_index), 
             'points': int(self.points)
         }
 
@@ -369,11 +371,12 @@ class Player:
             reserved_cards_vector[i*11:(i+1)*11] = card.vector
 
         state_vector = np.concatenate((
-            self.gems/4,  # length 6, there are actually 5 gold but 0 is all that matters
-            [sum(self.gems)/10],  # length 1
-            self.cards/4,  # length 5
+            self.gems / 4,  # length 6 (5 gold but 5/4 is ratio with others)
+            [sum(self.gems) / 10],  # length 1
+            self.cards / 4,  # length 5
             reserved_cards_vector,  # length 11*3 = 33
-            [self.points/15]  # length 1
+            [self.points / 15]  # length 1
         ))
+        assert len(state_vector) == 46, "Player state is {len(state_vector)}"
 
         return state_vector  # length 46

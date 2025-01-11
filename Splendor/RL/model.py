@@ -19,7 +19,7 @@ from keras.regularizers import l2                                      # type: i
 
 
 class RLAgent:
-    def __init__(self, paths, memory_buffer):
+    def __init__(self, paths):
         print("Making a new RLAgent.")
         enable_unsafe_deserialization()
         self.paths = paths
@@ -28,7 +28,7 @@ class RLAgent:
         self.action_size = 61
         self.batch_size = 128
 
-        self.memory = self.load_memory(memory_buffer)
+        self.memory = self.load_memory()
 
         self.gamma = 0.1  # 0.1**(1/25)
         self.epsilon = 1.0
@@ -72,16 +72,15 @@ class RLAgent:
         model.compile(loss='mse', optimizer=Adam(learning_rate=lr_schedule, clipnorm=1.0))
         return model
     
-    def load_memory(self, memory_buffer):
-        if memory_buffer:
-            memory_path = os.path.join(self.paths['rl_dir'], memory_buffer)
-            with open(memory_path, 'rb') as f:
+    def load_memory(self):
+        if self.paths['memory_buffer_path']:
+            with open(self.paths['memory_buffer_path'], 'rb') as f:
                 flattened_memory = pickle.load(f)
             loaded_memory = [mem for mem in flattened_memory]
-            print(f"Loading {len(loaded_memory)} {memory_buffer} memories")
+            print(f"Loading {len(loaded_memory)} memories")
         else:
-            # Should be run with preexisting memory from training.find_fastest_game
-            # because this memory is bad
+            # Should be run with preexisting memory from 
+            # training.find_fastest_game because this memory is bad
             dummy_state = np.zeros(self.state_size, dtype=np.float32)
             dummy_mask = np.ones(self.action_size, dtype=bool)
             loaded_memory = [[dummy_state, 1, 1, dummy_state, 1, dummy_mask]]
@@ -119,7 +118,7 @@ class RLAgent:
         
         return tf.where(legal_mask, qs, tf.fill(qs.shape, -tf.float32.max))
 
-    def _remember(self, memory, legal_mask) -> None:
+    def remember(self, memory, legal_mask) -> None:
         self.memory.append(deepcopy(memory))
         self.memory[-2].append(legal_mask.copy())
 
@@ -186,11 +185,7 @@ class RLAgent:
         if self.epsilon > self.epsilon_min:
             self.epsilon *= self.epsilon_decay
 
-    def save_model(self, base_path) -> None:
-        if not os.path.exists(base_path):
-            os.makedirs(base_path)
-        
-        model_path = os.path.join(base_path, 'model.keras')
-        self.model.save(model_path)
-        print(f"Saved the model at {model_path}")
+    def save_model(self) -> None:
+        self.model.save(self.paths['model_save_path'])
+        print(f"Saved the model at {self.paths['model_save_path']}")
         

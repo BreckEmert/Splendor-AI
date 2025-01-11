@@ -8,18 +8,24 @@ from Environment.Splendor_components.Player_components.player import Player  # t
 
 class Game:
     def __init__(self, players):
+        """Note: rest of init is performed by reset."""
         self.players = [Player(name, rl_model) for name, rl_model in players]
         self.reset()
 
     def reset(self):
         self.board = Board()
+
         for player in self.players:
-            player.reset()
+            player.reset()    
+
         self.half_turns: int = 0
         self.victor: bool = False
     
+    @property
+    def active_player(self):
+        return self.players[self.half_turns % 2]
+
     def turn(self):
-        self.active_player = self.players[self.half_turns % 2]
         game_state = self.to_vector()
 
         # Apply primary move
@@ -103,6 +109,8 @@ class Game:
         active_player = self.active_player.to_vector()  # length 46
         enemy_player = self.players[(self.half_turns+1) % 2].to_vector()  # length 46
 
+        # Adds on [0.0] which indicates progression through loop
         vector = np.concatenate((board_vector, active_player, [0.0], enemy_player))
+        assert len(vector) == 243, f"Game vector is length {len(vector)}"
         return vector.astype(np.float32)
     

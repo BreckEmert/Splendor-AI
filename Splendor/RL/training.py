@@ -2,20 +2,20 @@
 
 import json
 import os
-import pickle
+import shutil
 from copy import deepcopy
 
 from Environment.game import Game
 from RL import RLAgent, RandomAgent
 
 
-def debug_game(paths, memory_buffer):
+def debug_game(paths):
     # Make logging directories
     states_log_dir = os.path.dirname(paths['states_log_dir'])
     states_log_dir = os.path.join(states_log_dir, "debug")
     os.makedirs(states_log_dir, exist_ok=True)
     
-    ddqn_model = RLAgent(paths, memory_buffer)
+    ddqn_model = RLAgent(paths)
     players = [('Player1', ddqn_model), ('Player2', ddqn_model)]
     game = Game(players)
 
@@ -40,11 +40,11 @@ def debug_game(paths, memory_buffer):
 
         # print(f"Simulated game {episode}, game length * 2: {game.half_turns}")
 
-def ddqn_loop(paths, memory_buffer, log_rate=0):
+def ddqn_loop(paths, log_rate=0):
     """Add docstring
     """
     # Initialize players, their models, and a game (these get reset)
-    ddqn_model = RLAgent(paths, memory_buffer)
+    ddqn_model = RLAgent(paths)
     players = [('Player1', ddqn_model), ('Player2', ddqn_model)]
     game = Game(players)
     game_lengths = []
@@ -89,75 +89,70 @@ def ddqn_loop(paths, memory_buffer, log_rate=0):
     # Save memory
     ddqn_model.write_memory()
 
-def find_fastest_game(paths, n_games, log_states=False, append_to_prev_mem=False):
-    """"Simulates tons of games in a slightly intelligent way
-    putting only ones below a move length into memory
-    which thereby are better games for initial memory
+def find_fastest_game(paths, n_games, log_states=False):
+    """"Simulates tons of games, putting only ones below a move length 
+    into memory which thereby are better games for initial memory.
+    This doesn't need fancy logic other than uncommenting line 205 in
+    player.py as that stops the legal moves logic after it gets the
+    legal buy moves.  So it buys whenever it can just from that.
     """
     # Make the log folder for states, for visualization later
     states_log_dir = os.path.dirname(paths['states_log_dir'])
     states_log_dir = os.path.join(states_log_dir, "random")
+    shutil.rmtree(states_log_dir, ignore_errors=True)
+    os.makedirs(states_log_dir, exist_ok=True)
 
-    fastest_memory = []
-    while len(fastest_memory) < n_games:
+    players = [('Player1', RandomAgent(paths)), ('Player2', RandomAgent(paths))]
+    game = Game(players)
+    
+    completed_games = []
+    while len(completed_games) < n_games:
         # Initialize a game
-        players = [('Player1', RandomAgent()), ('Player2', RandomAgent())]
-        game = Game(players)
-        checkpoint = deepcopy(game)
-        original_checkpoint = deepcopy(game)
-
-        last_buy_turn = 1
-        buys_since_checkpoint = 0
+        game.reset()
+        game.state_history = []
+        for player in game.players:
+            player.model.reset()
+        original_checkpoint = deepcopy(game)  # Avoid completion bias by retrying even hard games
         
         # Enable logging if requested, for generate_images.py
         if log_states:
-            filename = f"random_states_episode_{len(fastest_memory)}.json"
+            filename = f"random_states_episode_{len(completed_games)}.json"
             log_state_path = os.path.join(states_log_dir, filename)
-            log_state_file = open(log_state_path, 'w')
 
         # Play a game
-        found = False
-        while not found:
-            game.turn()
-            if log_states:
-                json.dump(game.get_state(), log_state_file)
-                log_state_file.write('\n')
-            
-            # Only buy moves can make progress towards a win (index 15-44)
-            if 15 <= game.active_player.move_index < 44:
-                # print("Buying")
-                buys_since_checkpoint += 1
-                if buys_since_checkpoint == 2:
-                    if game.half_turns - last_buy_turn <= 16:
-                        last_buy_turn = game.half_turns
-                        # print("Setting last_buy_turn to ", last_buy_turn)
-                        checkpoint = deepcopy(game)
-                    else:
-                        game = deepcopy(checkpoint)
-                        # print("Loading old game at turn ", game.half_turns)
-                    buys_since_checkpoint = 0
+        completed_quickly = False
+        while not completed_quickly:
+            for _ in range(2):
+                game.turn()
+                game.state_history.append(game.get_state())
             
             # Just because someone won doesn't mean it was a short enough win
             if game.victor:
-                if game.half_turns < 55:
-                    print(game.half_turns)
+                if game.half_turns <= 54:
+                    print(f"Victory in {game.half_turns}, {len(completed_games)+1} completed games.")
                     for player in game.players:
                         if player.victor:
-                            fastest_memory.append(list(player.model.memory.copy()))
-                    found = True
+                            completed_quickly = True
+                            completed_games.append(deepcopy(player.model.memory))
+                            # Each player will have different memory lengths so this number must be less than the game length
+                            print(f"Appended {len(player.model.memory)} frames to completed_games")
+                            if log_states:
+                                with open(log_state_path, 'w') as f:
+                                    for state in game.state_history:
+                                        json.dump(state, f)
+                                        f.write('\n')
                 else:
-                    checkpoint = deepcopy(original_checkpoint)
+                    # Hard reset if the game wasn't fast enough
+                    # print("Resetting, game was too long.", game.half_turns)
                     game = deepcopy(original_checkpoint)
-                    buys_since_checkpoint = 0
-                    last_buy_turn = 1
-            else:
-                game.turn()
-                if log_states:
-                    json.dump(game.get_state(), log_state_file)
-                    log_state_file.write('\n')
+                    for player in game.players:
+                        player.model.reset()
+                
+                continue
 
     # Write out the memories of the winner of all the short games
-    flattened_memory = [item for sublist in fastest_memory for item in sublist]
+    flattened_memory = [state for game in completed_games for state in game]
+    print(f"flattened_memory has {len(flattened_memory)} length")
     game.active_player.model.write_memory(flattened_memory[1:])
 
 def show_game_rewards(players):

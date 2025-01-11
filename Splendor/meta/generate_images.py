@@ -2,16 +2,13 @@
 
 import json
 import os
+import shutil
 from PIL import Image, ImageDraw, ImageFont
 
 
-image_base_path = "/workspace/meta/images"
-game_image_path = "/workspace/RL/trained_agents/game_logs/game_images"
+def draw_game_state(game_state, index, image_save_path):
+    image_base_path = "/workspace/meta/images"
 
-gem_types = ['white', 'blue', 'green', 'red', 'black', 'gold']
-font = ImageFont.truetype("arialbd.ttf", 120)
-
-def draw_game_state(game_state, index, output_file):
     # Canvas
     width, height = 5000, 3000
     path = "/workspace/meta/images/table.jpg"
@@ -112,8 +109,7 @@ def draw_game_state(game_state, index, output_file):
             draw.text((int((p1_start_x+width/2)/2), 30+i*2800), move, fill=(255, 255, 255), font=font)
 
     # Save the image
-    os.makedirs(os.path.dirname(output_file), exist_ok=True)
-    canvas.save(output_file)
+    canvas.save(image_save_path)
 
 def move_to_text(move_index):
     mapping = {
@@ -134,7 +130,8 @@ def move_to_text(move_index):
     if move_index < 15:
         gem_index = move_index % 5
         if move_index < 5:
-            return f"Take 1 {mapping[gem_index]}"
+            # This is incomplete as there are up to two more takes in a seq
+            return f"Take 1 {mapping[gem_index]} (remaining takes broken for now)"
         elif move_index >= 10:
             return f"Discard 1 {mapping[gem_index]}"
         else:
@@ -172,5 +169,16 @@ def main(log_path, output_image_path):
                     draw_game_state(game_state, index, output_file)
 
 if __name__ == '__main__':
-    log_path = "/workspace/RL/trained_agents/game_logs/game_states"
-    main(log_path, game_image_path)
+    model_name = "64_01_13_04_56"  # model name like 64_01_13_04_56 or random
+
+    base_path = "/workspace/RL/saved_files"
+    log_path = os.path.join(base_path, "game_states", model_name)
+    image_save_path = os.path.join(base_path, "rendered_games", model_name)
+    shutil.rmtree(image_save_path, ignore_errors=True)
+    os.makedirs(image_save_path, exist_ok=True)
+
+    gem_types = ['white', 'blue', 'green', 'red', 'black', 'gold']
+    font_path = "/workspace/meta/arialbd.ttf"
+    font = ImageFont.truetype(font_path, 120)
+
+    main(log_path, image_save_path)

@@ -8,9 +8,13 @@ from copy import deepcopy
 
 
 class RandomAgent:
-    def __init__(self):
-        self.state_size = 241
+    def __init__(self, paths):
+        self.paths = paths
+        self.state_size = 243
         self.action_size = 61
+        # self.memory = self.load_memory()
+
+    def reset(self):
         self.memory = self.load_memory()
 
     def load_memory(self):
@@ -28,11 +32,10 @@ class RandomAgent:
             pickle.dump(memory, f)
 
         print(f"Wrote {len(memory)} memories to {memory_path}")
-        print("Absolute memory path: ", os.path.abspath(memory_path))
 
     def get_predictions(self, state, legal_mask):
         return np.where(legal_mask, np.random.rand(self.action_size), -np.inf)
 
-    def remember(self, memory, legal_mask):
+    def remember(self, memory, legal_mask) -> None:
         self.memory.append(deepcopy(memory))
         self.memory[-2].append(legal_mask.copy())
