@@ -8,6 +8,7 @@ from Environment.Splendor_components.Player_components.player import Player  # t
 
 class Game:
     def __init__(self, players):
+        """Note: rest of init is performed by reset."""
         self.players = [Player(name, rl_model) for name, rl_model in players]
         self.reset()
 
@@ -27,6 +28,7 @@ class Game:
         if chosen_move:
             self.apply_move(chosen_move)
         else:
+            print("Setting game.victor to true")
             self.victor = True
 
         self.half_turns += 1
