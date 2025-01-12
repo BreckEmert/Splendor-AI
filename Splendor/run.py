@@ -60,11 +60,12 @@ def main():
     # Function calls
     # ddqn_loop(paths, memory_buffer="random", log_rate=10)
     # debug_game(paths, memory_buffer=None)
-    find_fastest_game(paths, n_games=2, log_states=True)  
+    find_fastest_game(paths, n_games=200, log_states=False)  
         # !Uncomment line 205 in player.py!
 
  
 if __name__ == "__main__":
-    # Need to go through and make sure .copy() and .deepcopy() are fully utilized
-    # Just fixed two so there are probably more
+    """If you're ever having issues make sure everything you pull from the game
+    is immutable - using .copy() and copy.deepcopy() where needed.
+    """
     main()

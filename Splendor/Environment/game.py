@@ -14,13 +14,18 @@ class Game:
 
     def reset(self):
         self.board = Board()
+
         for player in self.players:
-            player.reset()
+            player.reset()    
+
         self.half_turns: int = 0
         self.victor: bool = False
     
+    @property
+    def active_player(self):
+        return self.players[self.half_turns % 2]
+
     def turn(self):
-        self.active_player = self.players[self.half_turns % 2]
         game_state = self.to_vector()
 
         # Apply primary move
@@ -28,7 +33,6 @@ class Game:
         if chosen_move:
             self.apply_move(chosen_move)
         else:
-            print("Setting game.victor to true")
             self.victor = True
 
         self.half_turns += 1
