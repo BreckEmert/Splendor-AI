@@ -108,10 +108,7 @@ def find_fastest_game(paths, n_games, log_states=False):
         # Initialize a game
         game.reset()
         game.state_history = []
-        checkpoint = deepcopy(game)
-        original_checkpoint = deepcopy(game)
-        last_buy_turn = 0
-        buys_since_checkpoint = 0
+        original_checkpoint = deepcopy(game)  # Avoid completion bias by retrying even hard games
         
         # Enable logging if requested, for generate_images.py
         if log_states:
@@ -119,10 +116,9 @@ def find_fastest_game(paths, n_games, log_states=False):
             log_state_path = os.path.join(states_log_dir, filename)
 
         # Play a game
-        found = False
-        while not found:
+        completed_quickly = False
+        while not completed_quickly:
             for _ in range(2):
-                print("taking turns")
                 game.turn()
                 game.state_history.append(game.get_state())
             
@@ -132,29 +128,18 @@ def find_fastest_game(paths, n_games, log_states=False):
                     print("Victory in ", game.half_turns)
                     for player in game.players:
                         if player.victor:
-                            found = True
-                            completed_games.append(list(player.model.memory.copy()))
-                            with open(log_state_path, 'w') as f:
-                                for state in game.state_history:
-                                    json.dump(state, f)
-                                    f.write('\n')
+                            completed_quickly = True
+                            completed_games.append(deepcopy(player.model.memory))
+                            if log_states:
+                                with open(log_state_path, 'w') as f:
+                                    for state in game.state_history:
+                                        json.dump(state, f)
+                                        f.write('\n')
                 else:
-                    print(f"Resetting, giving up after {game.half_turns}")
-                    checkpoint = deepcopy(original_checkpoint)
+                    # Hard reset if the game wasn't fast enough
                     game = deepcopy(original_checkpoint)
+                
                 continue
-
-            # Make sure the game is moving quickly enough
-            if 15 <= game.active_player.move_index < 44:
-                buys_since_checkpoint += 1
-                if buys_since_checkpoint == 2:
-                    if game.half_turns - last_buy_turn <= 16:
-                        last_buy_turn = game.half_turns
-                        checkpoint = deepcopy(game)
-                    else:
-                        game = deepcopy(checkpoint)
-                        print("Loading old game at turn ", game.half_turns)
-                    buys_since_checkpoint = 0
 
     # Write out the memories of the winner of all the short games
     flattened_memory = [item for sublist in completed_games for item in sublist]

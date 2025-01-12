@@ -1,5 +1,6 @@
 # Splendor/Environment/Splendor_components/player.py
 
+import copy
 import numpy as np
 
 
@@ -298,7 +299,6 @@ class Player:
                 self.model.remember(memory, legal_mask.copy())
                 self.model.memory[-1].append(legal_mask.copy())
                 self.victor = True
-                print("Setting player.victor to true")
                 return None
 
             next_state = state.copy()
@@ -354,13 +354,13 @@ class Player:
         return False
 
     def get_state(self):
-        chosen_move = int(self.move_index)
-        self.move_index = 9999
+        # chosen_move = int(self.move_index)
+        # self.move_index = 9999
         return {
             'gems': self.gems.tolist(), 
-            'cards': self.card_ids, 
+            'cards': copy.deepcopy(self.card_ids), 
             'reserved_cards': [(card.tier, card.id) for card in self.reserved_cards], 
-            'chosen_move': chosen_move, 
+            'chosen_move': int(self.move_index), 
             'points': int(self.points)
         }
 
@@ -370,11 +370,11 @@ class Player:
             reserved_cards_vector[i*11:(i+1)*11] = card.vector
 
         state_vector = np.concatenate((
-            self.gems/4,  # length 6, there are actually 5 gold but 0 is all that matters
-            [sum(self.gems)/10],  # length 1
-            self.cards/4,  # length 5
+            self.gems / 4,  # length 6, there are actually 5 gold but 0 is all that matters
+            [sum(self.gems) / 10],  # length 1
+            self.cards / 4,  # length 5
             reserved_cards_vector,  # length 11*3 = 33
-            [self.points/15]  # length 1
+            [self.points / 15]  # length 1
         ))
 
         return state_vector  # length 46
