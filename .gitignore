@@ -6,3 +6,5 @@
 Splendor/states.csv
 Splendor/next_states.csv
 *.pkl
+/Splendor/RL/saved_files/rendered_games
+/Splendor/RL/saved_files/game_states
