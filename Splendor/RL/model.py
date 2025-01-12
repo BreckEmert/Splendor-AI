@@ -119,7 +119,7 @@ class RLAgent:
         
         return tf.where(legal_mask, qs, tf.fill(qs.shape, -tf.float32.max))
 
-    def _remember(self, memory, legal_mask) -> None:
+    def remember(self, memory, legal_mask) -> None:
         self.memory.append(deepcopy(memory))
         self.memory[-2].append(legal_mask.copy())
 
