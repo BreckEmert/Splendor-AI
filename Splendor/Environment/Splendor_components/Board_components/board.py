@@ -70,11 +70,11 @@ class Board:
         return {'gems': self.gems.tolist(), 'cards': card_dict}
         
     def to_vector(self):
-        tier_vector = [ # 11*4*3
-            card.vector if card else np.zeros(11)
-            for tier in self.cards[:3]
-            for card in tier
-        ]
+        tier_vector = [
+            card.vector if card else np.zeros(11)  # reward1hot, points, cost1hot = 11
+            for tier in self.cards[:3]  # 3 tiers
+            for card in tier  # 4 cards per tier
+        ]  # 11*4*3 = 132
         
         nobles_vector = [ # 6*3
             card.vector[5:] if card else np.zeros(6)
@@ -82,4 +82,5 @@ class Board:
         ]
 
         state_vector = np.concatenate((*tier_vector, *nobles_vector))  # No longer including self.gems
+        assert len(state_vector) == 150, f"board vector is {len(state_vector)}"
         return state_vector  # length 150, UPDATE STATE_OFFSET IF THIS CHANGES

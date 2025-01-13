@@ -9,13 +9,13 @@ from Environment.game import Game
 from RL import RLAgent, RandomAgent
 
 
-def debug_game(paths, memory_buffer):
+def debug_game(paths):
     # Make logging directories
     states_log_dir = os.path.dirname(paths['states_log_dir'])
     states_log_dir = os.path.join(states_log_dir, "debug")
     os.makedirs(states_log_dir, exist_ok=True)
     
-    ddqn_model = RLAgent(paths, memory_buffer)
+    ddqn_model = RLAgent(paths)
     players = [('Player1', ddqn_model), ('Player2', ddqn_model)]
     game = Game(players)
 
@@ -40,11 +40,11 @@ def debug_game(paths, memory_buffer):
 
         # print(f"Simulated game {episode}, game length * 2: {game.half_turns}")
 
-def ddqn_loop(paths, memory_buffer, log_rate=0):
+def ddqn_loop(paths, log_rate=0):
     """Add docstring
     """
     # Initialize players, their models, and a game (these get reset)
-    ddqn_model = RLAgent(paths, memory_buffer)
+    ddqn_model = RLAgent(paths)
     players = [('Player1', ddqn_model), ('Player2', ddqn_model)]
     game = Game(players)
     game_lengths = []
@@ -90,9 +90,11 @@ def ddqn_loop(paths, memory_buffer, log_rate=0):
     ddqn_model.write_memory()
 
 def find_fastest_game(paths, n_games, log_states=False):
-    """"Simulates tons of games in a slightly intelligent way
-    putting only ones below a move length into memory
-    which thereby are better games for initial memory
+    """"Simulates tons of games, putting only ones below a move length 
+    into memory which thereby are better games for initial memory.
+    This doesn't need fancy logic other than uncommenting line 205 in
+    player.py as that stops the legal moves logic after it gets the
+    legal buy moves.  So it buys whenever it can just from that.
     """
     # Make the log folder for states, for visualization later
     states_log_dir = os.path.dirname(paths['states_log_dir'])
@@ -108,6 +110,8 @@ def find_fastest_game(paths, n_games, log_states=False):
         # Initialize a game
         game.reset()
         game.state_history = []
+        for player in game.players:
+            player.model.reset()
         original_checkpoint = deepcopy(game)  # Avoid completion bias by retrying even hard games
         
         # Enable logging if requested, for generate_images.py
@@ -125,11 +129,13 @@ def find_fastest_game(paths, n_games, log_states=False):
             # Just because someone won doesn't mean it was a short enough win
             if game.victor:
                 if game.half_turns <= 54:
-                    print("Victory in ", game.half_turns)
+                    print(f"Victory in {game.half_turns}, {len(completed_games)+1} completed games.")
                     for player in game.players:
                         if player.victor:
                             completed_quickly = True
                             completed_games.append(deepcopy(player.model.memory))
+                            # Each player will have different memory lengths so this number must be less than the game length
+                            print(f"Appended {len(player.model.memory)} frames to completed_games")
                             if log_states:
                                 with open(log_state_path, 'w') as f:
                                     for state in game.state_history:
@@ -137,12 +143,16 @@ def find_fastest_game(paths, n_games, log_states=False):
                                         f.write('\n')
                 else:
                     # Hard reset if the game wasn't fast enough
+                    # print("Resetting, game was too long.", game.half_turns)
                     game = deepcopy(original_checkpoint)
+                    for player in game.players:
+                        player.model.reset()
                 
                 continue
 
     # Write out the memories of the winner of all the short games
-    flattened_memory = [item for sublist in completed_games for item in sublist]
+    flattened_memory = [state for game in completed_games for state in game]
+    print(f"flattened_memory has {len(flattened_memory)} length")
     game.active_player.model.write_memory(flattened_memory[1:])
 
 def show_game_rewards(players):

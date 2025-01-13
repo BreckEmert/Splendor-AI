@@ -9,10 +9,11 @@ class Player:
         self.name: str = name
         self.model = model
         self.state_offset: int = 150
+        self.reset()
     
     def reset(self):
-        self.gems: np.ndarray = np.zeros(6, dtype=int)
-        self.cards: np.ndarray = np.zeros(5, dtype=int)
+        self.gems: np.ndarray = np.zeros(6, dtype=int)  # Gold gem so 6
+        self.cards: np.ndarray = np.zeros(5, dtype=int)  # No gold card so 5
         self.reserved_cards: list = []
         self.points: int = 0
 
@@ -60,7 +61,7 @@ class Player:
         state = next_state.copy()
 
         return discard, state
-    
+
     def choose_take(self, state, available_gems, progress, reward=0.0, take_index=None):
         # Set legal mask to only legal takes
         legal_mask = np.zeros(61, dtype=bool)
@@ -229,7 +230,7 @@ class Player:
                     legal_moves.append(('reserve top', (tier_index, None)))
         
         return legal_moves
-    
+
     def legal_to_vector(self, legal_moves):
         legal_mask = np.zeros(61, dtype=bool)
         for move, details in legal_moves:
@@ -257,7 +258,7 @@ class Player:
                     legal_mask[57 + tier] = True
 
         return legal_mask
-    
+
     def vector_to_details(self, state, board, legal_mask, move_index):
         tier = move_index % 15 // 4
         card_index = move_index % 15 % 4
@@ -336,7 +337,7 @@ class Player:
             self.model.remember(memory, legal_mask.copy())
 
         return move
-    
+
     def choose_move(self, board, state):
         legal_moves = self.get_legal_moves(board)
         legal_mask = self.legal_to_vector(legal_moves)
@@ -344,7 +345,7 @@ class Player:
         
         self.move_index = np.argmax(rl_moves)
         return self.vector_to_details(state, board, legal_mask, self.move_index)
-    
+
     def check_noble_visit(self, board):
         for index, noble in enumerate(board.cards[3]):
             if noble and np.all(self.cards >= noble.cost):
@@ -370,11 +371,12 @@ class Player:
             reserved_cards_vector[i*11:(i+1)*11] = card.vector
 
         state_vector = np.concatenate((
-            self.gems / 4,  # length 6, there are actually 5 gold but 0 is all that matters
+            self.gems / 4,  # length 6 (5 gold but 5/4 is ratio with others)
             [sum(self.gems) / 10],  # length 1
             self.cards / 4,  # length 5
             reserved_cards_vector,  # length 11*3 = 33
             [self.points / 15]  # length 1
         ))
+        assert len(state_vector) == 46, "Player state is {len(state_vector)}"
 
         return state_vector  # length 46

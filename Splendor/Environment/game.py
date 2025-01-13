@@ -109,6 +109,8 @@ class Game:
         active_player = self.active_player.to_vector()  # length 46
         enemy_player = self.players[(self.half_turns+1) % 2].to_vector()  # length 46
 
+        # Adds on [0.0] which indicates progression through loop
         vector = np.concatenate((board_vector, active_player, [0.0], enemy_player))
+        assert len(vector) == 243, f"Game vector is length {len(vector)}"
         return vector.astype(np.float32)
     
