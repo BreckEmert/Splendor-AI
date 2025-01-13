@@ -53,19 +53,24 @@ def get_paths(layer_sizes, model_from_name, memory_buffer_name):
 def main():
     layer_sizes = [64]
     model_from_name = None  # "64_32.keras"
-    memory_buffer = None  # "random_memory.pkl"
+    memory_buffer = "random_memory.pkl"  # "random_memory.pkl"
     paths = get_paths(layer_sizes, model_from_name, memory_buffer)
     print(paths)
 
     # Function calls
-    # ddqn_loop(paths, memory_buffer="random", log_rate=10)
+    ddqn_loop(paths, log_rate=10)
+        #! Comment line 205 in player.py!
     # debug_game(paths, memory_buffer=None)
-    find_fastest_game(paths, n_games=200, log_states=False)  
+    # find_fastest_game(paths, n_games=1, log_states=True)  f
         # !Uncomment line 205 in player.py!
 
  
 if __name__ == "__main__":
-    """If you're ever having issues make sure everything you pull from the game
-    is immutable - using .copy() and copy.deepcopy() where needed.
+    """If you're ever having issues make sure everything you pull from 
+    the game is immutable - using .copy() and copy.deepcopy() where needed.  
+    Also note that the model will remember multiple times per turn, 
+    because of the system I have to deal with the combinatoric space 
+    required to take 3 tokens in a single pass.  This means states, game
+    frames, and memories may not agree in length.
     """
     main()

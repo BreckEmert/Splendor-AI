@@ -10,8 +10,11 @@ from copy import deepcopy
 class RandomAgent:
     def __init__(self, paths):
         self.paths = paths
-        self.state_size = 241
+        self.state_size = 243
         self.action_size = 61
+        # self.memory = self.load_memory()
+
+    def reset(self):
         self.memory = self.load_memory()
 
     def load_memory(self):

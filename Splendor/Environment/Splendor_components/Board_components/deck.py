@@ -24,7 +24,7 @@ class Card:
         gem_one_hot = self.gem_to_one_hot(self.gem)
         return np.concatenate((gem_one_hot, [self.points/15], self.cost/4))
 
-    
+
 class Deck:
     def __init__(self, tier):
         self.tier = tier
@@ -42,13 +42,14 @@ class Deck:
                  cost=[row[3], row[4], row[5], row[6], row[7]])
             for row in deck.itertuples(index=False)
         ]
-            
+        
         random.shuffle(cards)
         
         return cards
 
     def draw(self):
         return self.cards.pop() if self.cards else None
-    
+
     def peek_vector(self):
         return self.cards[-1].vector if self.cards else np.zeros(11)
+    
