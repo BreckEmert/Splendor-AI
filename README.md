@@ -14,10 +14,17 @@ Welcome to the Splendor-AI repository! This project allows you to build an RL-ba
 - **Visualization**: Generates frames of the games at each state along with card counts and move descriptions.
 - **Modular Design**: I built this in a fully object-oriented, clean and commented way.  Although the overall game is too complex to fully redo, you should have an easy time changing any specific set of features you want.
 
+<p align="center">
+  <img src="https://imgur.com/FZVbTyX.png" alt="Viz 1" width="45%">
+  <img src="https://imgur.com/lJ8jv10.png" alt="Viz 2" width="45%">
+</p>
+
 ## Getting Started
 
-To get started with the project, clone the repository and follow the setup instructions below. After setting things up, you'll run 'run.py' to use it.
-Depending on your setup, various filepathing may need to be changed.  I've done a good job making all of the filepathing dynamic, and os.makedirs, but occasionally there are some hardcoded paths, such as in the .dockerfile.  Please check the run.py, and .devcontainer folder to make sure things are good if you have issues.
+To get started with the project, follow the setup instructions below. After setting things up, you'll run 'run.py' to use it.  I've done a good job keeping all of the filepathing dynamic.  Please check the run.py, and .devcontainer folder to make sure things are good if you have issues.
+
+I have a lot of Tensorboard logs set up which can be run from separate terminal while you train.  Note that there are tons of different commands I have had to try to get this to work, and sometimes there are port-forwarding-type issues.  You may have to Google around for commands that work for you.  
+```tensorboard --logdir=/workspace/RL/saved_files/tensorboard_logs```
 
 ## Requirements
 **Note:** You *can* just run 'run.py' after cloning.  However, if you plan to use this project extensively, it may be worth using the Docker+DevContainer setup with CUDA:
@@ -35,3 +42,4 @@ Next, open VSCode and open the project location (Splendor subfolder).  It should
 ```wsl2
 docker run -dit --gpus all --rm -v **your-GitHub-path**/Splendor-AI/Splendor:/workspace -p 3000:3000 --name splendor-dev splendor-dev
 ```
+

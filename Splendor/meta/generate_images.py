@@ -130,7 +130,8 @@ def move_to_text(move_index):
     if move_index < 15:
         gem_index = move_index % 5
         if move_index < 5:
-            return f"Take 1 {mapping[gem_index]}"
+            # This is incomplete as there are up to two more takes in a seq
+            return f"Take 1 {mapping[gem_index]} (remaining takes broken for now)"
         elif move_index >= 10:
             return f"Discard 1 {mapping[gem_index]}"
         else:
@@ -168,11 +169,11 @@ def main(log_path, output_image_path):
                     draw_game_state(game_state, index, output_file)
 
 if __name__ == '__main__':
-    model_type = "random"  # ddqn, random
+    model_name = "64_01_13_04_56"  # model name like 64_01_13_04_56 or random
 
     base_path = "/workspace/RL/saved_files"
-    log_path = os.path.join(base_path, "game_states", "random")
-    image_save_path = os.path.join(base_path, "rendered_games", model_type)
+    log_path = os.path.join(base_path, "game_states", model_name)
+    image_save_path = os.path.join(base_path, "rendered_games", model_name)
     shutil.rmtree(image_save_path, ignore_errors=True)
     os.makedirs(image_save_path, exist_ok=True)
 
