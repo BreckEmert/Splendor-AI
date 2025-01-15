@@ -36,10 +36,11 @@ I have a lot of Tensorboard logs set up which can be run from separate terminal 
 git clone https://github.com/BreckEmert/Splendor-AI
 ```
 
-Next, open VSCode and open the project location (Splendor subfolder).  It should prompt you to reopen in a container, and launch the Docker accordingly.
+Next, open VSCode and open the project location (Splendor subfolder).  It should prompt you to reopen in a container, which launches the Docker accordingly.
 
 (extra, probably not needed): running the docker with -dit straight from a WSL terminal allows you to host the terminal on VSCode instead of the terminal where this is ran:
 ```wsl2
+docker build -t splendor-dev **your GitHub path**/Splendor-AI/Splendor/.devcontainer
 docker run -dit --gpus all --rm -v **your-GitHub-path**/Splendor-AI/Splendor:/workspace -p 3000:3000 --name splendor-dev splendor-dev
 ```
 
