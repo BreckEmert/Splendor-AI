@@ -6,5 +6,5 @@ from .Board_components import (
 )
 from .Player_components import (
     Player, 
-    BestStrategy, RandomStrategy, OffensiveStrategy, ResourceHog, ObliviousStrategy
+    # BestStrategy, RandomStrategy, OffensiveStrategy, ResourceHog, ObliviousStrategy
 )

@@ -19,20 +19,24 @@ class Board:
         self.deck_mapping = {
             0: self.tier1, 
             1: self.tier2, 
-            2: self.tier3, 
-            3: self.nobles
+            2: self.tier3
         }
         
         self.cards = [
             [self.tier1.draw() for _ in range(4)],
             [self.tier2.draw() for _ in range(4)],
-            [self.tier3.draw() for _ in range(4)], 
-            [self.nobles.draw() for _ in range(3)]
+            [self.tier3.draw() for _ in range(4)]
         ]
+
+        self.nobles = [self.nobles.draw() for _ in range(3)]
                 
-    def take_or_return_gems(self, gems_to_change):
-        self.gems -= np.pad(gems_to_change, (0, 6-len(gems_to_change)))
-        assert np.all(self.gems >= 0), f"Illegal board gems {self.gems}, {gems_to_change}"
+    def take_gems(self, taken_gems):
+        self.gems -= np.pad(taken_gems, (0, 6-len(taken_gems)))
+        assert np.all(self.gems >= 0), f"Illegal board gems {self.gems}, {taken_gems}"
+
+    def return_gems(self, returned_gems):
+        self.gems += np.pad(returned_gems, (0, 6-len(returned_gems)))
+        assert np.all(self.gems >= 0), f"Illegal board gems {self.gems}, {returned_gems}"
 
     def take_card(self, tier, position):
         card = self.cards[tier][position]
@@ -60,27 +64,19 @@ class Board:
 
         # Remove card
         return self.deck_mapping[tier].draw(), gold
-    
-    def get_state(self):
-        card_dict = {
-            f"tier{tier_index+1}": [card.id if card else None for card in tier] 
-            for tier_index, tier in enumerate(self.cards[:3])
-        }
-        card_dict['nobles'] = [card.id if card else None for card in self.cards[3]]
-        return {'gems': self.gems.tolist(), 'cards': card_dict}
         
-    def to_vector(self):
+    def to_state_vector(self):
         tier_vector = [
             card.vector if card else np.zeros(11)  # reward1hot, points, cost1hot = 11
-            for tier in self.cards[:3]  # 3 tiers
+            for tier in self.cards  # 3 tiers
             for card in tier  # 4 cards per tier
         ]  # 11*4*3 = 132
         
         nobles_vector = [ # 6*3
             card.vector[5:] if card else np.zeros(6)
-            for card in self.cards[3]
+            for card in self.nobles
         ]
 
         state_vector = np.concatenate((*tier_vector, *nobles_vector))  # No longer including self.gems
         assert len(state_vector) == 150, f"board vector is {len(state_vector)}"
-        return state_vector  # length 150, UPDATE STATE_OFFSET IF THIS CHANGES
+        return state_vector  # length 150
