@@ -52,8 +52,8 @@ def get_paths(layer_sizes, model_from_name, memory_buffer_name):
 
 def main():
     layer_sizes = [64]
-    model_from_name = None  # "64_32.keras"
-    memory_buffer = "random_memory.pkl"  # "random_memory.pkl"
+    model_from_name = "64_01_15_03_27.keras"  # "64_01_14_04_51.keras"
+    memory_buffer = "memory.pkl"  # memory random_memory
     paths = get_paths(layer_sizes, model_from_name, memory_buffer)
     print(paths)
 
