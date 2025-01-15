@@ -119,8 +119,8 @@ class RLAgent:
         return tf.where(legal_mask, qs, tf.fill(qs.shape, -tf.float32.max))
 
     def remember(self, memory, legal_mask) -> None:
+        self.memory[-1].append(legal_mask.copy())  # Avoids recalculation, but overall I regret this method
         self.memory.append(deepcopy(memory))
-        self.memory[-2].append(legal_mask.copy())
 
     @tf.function
     def _batch_train(self, batch) -> None:
@@ -160,21 +160,35 @@ class RLAgent:
             self.step += 1
             step = self.step
             with self.tensorboard.as_default():
-                # Grouped cards
-                tf.summary.histogram('Training Metrics/action_hist', actions, step=step)
-                tf.summary.scalar('Training Metrics/batch_loss', tf.reduce_mean(loss), step=step)
-                tf.summary.scalar('Training Metrics/avg_reward', tf.reduce_mean(rewards), step=step)
-                tf.summary.scalar('Training Metrics/epsilon', self.epsilon, step=step)
+                # Training Metrics
                 current_lr = self.model.optimizer.learning_rate
                 tf.summary.scalar('Training Metrics/learning_rate', current_lr, step=step)
-                legal_qs = tf.where(tf.math.is_finite(qs), qs, tf.zeros_like(qs))
-                tf.summary.scalar('Training Metrics/avg_q', tf.reduce_mean(legal_qs), step=step)
-                
+                tf.summary.histogram('Training Metrics/action_hist', actions, step=step)
+                tf.summary.scalar('Training Metrics/batch_loss', tf.reduce_mean(loss), step=step)
+                tf.summary.scalar('Training Metrics/epsilon', self.epsilon, step=step)
+
+
+                # Q-Values
+                legal_qs = tf.where(tf.math.is_finite(qs), qs, tf.zeros_like(qs))  # Removes NaN and inf
+                tf.summary.scalar('Q-Values/avg_q', tf.reduce_mean(legal_qs), step=step)  # Global average q
+                tf.summary.scalar('Q-Values/avg_reward', tf.reduce_mean(rewards), step=step)  # Global average reward
+
+                tf.summary.scalar('Q-Values/avg_take_1', tf.reduce_mean(legal_qs[:5]), step=step)  # Take a single token (really 3)
+                tf.summary.scalar('Q-Values/avg_take_2', tf.reduce_mean(legal_qs[5:10]), step=step)  # Take two tokens of a single kind
+                tf.summary.scalar('Q-Values/avg_discard', tf.reduce_mean(legal_qs[10:15]), step=step)  # Discard a single token
+
+                tf.summary.scalar('Q-Values/avg_buy_tier_1', tf.reduce_mean(legal_qs[15:27]), step=step)  # Buying actions (each tier)
+                tf.summary.scalar('Q-Values/avg_buy_tier_2', tf.reduce_mean(legal_qs[27:39]), step=step)
+                tf.summary.scalar('Q-Values/avg_buy_tier_3', tf.reduce_mean(legal_qs[39:45]), step=step)
+
+                tf.summary.scalar('Q-Values/avg_reserve', tf.reduce_mean(legal_qs[45:]), step=step)  # Reserve actions
+
+
                 # Weights
                 for layer in self.model.layers:
                     if hasattr(layer, 'kernel') and layer.kernel is not None:
                         weights = layer.kernel
-                        tf.summary.histogram('Model Weights/'+ layer.name +'_weights', weights, step=step)
+                        tf.summary.histogram('Model Weights/' + layer.name + '_weights', weights, step=step)
 
     def replay(self) -> None:
         """Standard replay function used in off-policy RL"""

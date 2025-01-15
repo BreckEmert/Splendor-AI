@@ -22,6 +22,8 @@ class Player:
         self.victor: bool = False
         self.move_index: int = 9999  # Set to impossible to avoid confusion
 
+        self.discard_disincentive: float = -0.1
+
     def take_or_spend_gems(self, gems_to_change):
         if len(gems_to_change) < 6:
             gems_to_change = np.pad(gems_to_change, (0, 6-len(gems_to_change)))
@@ -93,7 +95,7 @@ class Player:
 
         takes = min(3, sum(board_gems))
         discards = total_gems - 7
-        discard_reward = -1/30*discards
+        discard_reward = self.discard_disincentive*discards
         chosen_gems = np.zeros(5, dtype=int)
 
         # Perform the move that was initially chosen
@@ -119,7 +121,7 @@ class Player:
         # Choose necessary takes
         while takes > 0:
             take, state = self.choose_take(
-                state, board_gems-chosen_gems, progress=takes, reward=-1/30)
+                state, board_gems-chosen_gems, progress=takes, reward=0)
             chosen_gems += take
             takes -= 1
 
@@ -271,7 +273,7 @@ class Player:
                 gem_index = move_index % 5
                 next_state = state.copy()
                 next_state[gem_index+self.state_offset] += 0.5
-                memory = [state.copy(), move_index, -1/30, next_state.copy(), 1]
+                memory = [state.copy(), move_index, 0, next_state.copy(), 1]
                 self.model.remember(memory, legal_mask.copy())
 
                 chosen_gems = np.zeros(6, dtype=int)
@@ -283,12 +285,12 @@ class Player:
             # Remember
             # ~15/1.3 purchases in a game? y=\frac{2}{15}-\frac{2}{15}\cdot\frac{1.3}{15}x
             # reward = max(3/15-3/15*1.3/15*sum(self.gems), 0.0)
-            reserved_card_index = move_index-27 if move_index<30 else move_index-42
+            reserved_card_index = move_index%15 - 12  # First 12 are shop cards, last 3 are reserved cards
             if tier < 3:  # Buy
                 points = board.cards[tier][card_index].points
             else:  # Buy reserved
                 points = self.reserved_cards[reserved_card_index].points
-            reward = min(points, 15-self.points) / 30
+            reward = min(points, 15-self.points) / 15
 
             # Check noble visit and end of game
             if self.check_noble_visit(board):
@@ -308,6 +310,7 @@ class Player:
             memory = [state.copy(), move_index, reward, next_state.copy(), 1]
             self.model.remember(memory, legal_mask.copy())
             
+            # Buy moves
             if move_index < 27:
                 move = ('buy', (tier, card_index))
             elif move_index < 30:
@@ -332,7 +335,7 @@ class Player:
             # Remember
             next_state = state.copy()
             next_state[offset:offset+11] = board.deck_mapping[tier].peek_vector()
-            reward = 0.0 if sum(self.gems) < 10 else 0.0
+            reward = 0.0 if sum(self.gems) < 10 else self.discard_disincentive
             memory = [state.copy(), move_index, reward, next_state.copy(), 1]
             self.model.remember(memory, legal_mask.copy())
 
