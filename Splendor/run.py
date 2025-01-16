@@ -1,14 +1,15 @@
 # Splendor/run.py
 
 import os
-from datetime import datetime
+from datetime import datetime, timedelta
 
 from RL import ddqn_loop, debug_game, find_fastest_game  # type: ignore
 
 
 def get_unique_filename(layer_sizes):
     nickname = "_".join(map(str, layer_sizes))
-    timestamp = datetime.now().strftime("%m_%d_%H_%M")  # mm/dd/hh/mm
+    timestamp = datetime.now() - timedelta(hours=6)
+    timestamp = timestamp.strftime("%m_%d_%H_%M")  # mm/dd/hh/mm
     return f"{nickname}_{timestamp}"
 
 def get_paths(layer_sizes, model_from_name, memory_buffer_name):
@@ -52,8 +53,8 @@ def get_paths(layer_sizes, model_from_name, memory_buffer_name):
 
 def main():
     layer_sizes = [64]
-    model_from_name = "64_01_15_03_43.keras"  # "64_01_14_04_51.keras"
-    memory_buffer = "random_memory.pkl"  # memory random_memory
+    model_from_name = None  # "64_01_14_04_51.keras"
+    memory_buffer = None  # memory.pkl random_memory.pkl
     paths = get_paths(layer_sizes, model_from_name, memory_buffer)
     print(paths)
 

@@ -25,13 +25,9 @@ class Player:
         self.discard_disincentive: float = -0.1
 
     def take_or_spend_gems(self, gems_to_change):
-        if len(gems_to_change) < 6:
+        if len(gems_to_change) < 6:  # Pads gold dim if needed
             gems_to_change = np.pad(gems_to_change, (0, 6-len(gems_to_change)))
         self.gems += gems_to_change
-
-        # Validate gem counts
-        assert np.all(self.gems >= 0), f"Illegal player gems: {self.gems}, {gems_to_change}"
-        assert sum(self.gems) <= 10, f"Illegal player gems: {self.gems}, {gems_to_change}"
 
     def get_bought_card(self, card):
         self.cards[card.gem] += 1
@@ -87,15 +83,11 @@ class Player:
         return take, next_state
 
     def take_tokens_loop(self, state, board_gems, move_index=None):
-        player_gems = self.gems[:5].copy()
-        total_gems = sum(self.gems)
+        """(simplified-Splendor modified)"""
         board_gems = (board_gems>0).astype(int)
-
         state = state.copy()
 
-        takes = min(3, sum(board_gems))
-        discards = total_gems - 7
-        discard_reward = self.discard_disincentive*discards
+        takes = 3
         chosen_gems = np.zeros(5, dtype=int)
 
         # Perform the move that was initially chosen
@@ -104,19 +96,7 @@ class Player:
                 chosen_gem, state = self.choose_take(
                     state, board_gems, 0.6, 0.0, move_index)
                 takes -= 1
-            else:
-                chosen_gem, state = self.choose_discard(
-                    state, self.gems, 0.6, discard_reward, move_index)
-                discards -= 1
             chosen_gems += chosen_gem
-
-        # Choose necessary discards
-        while discards > 0:
-            discard, state = self.choose_discard(
-                state, player_gems+chosen_gems, progress=discards, reward=discard_reward)
-            # discard_reward = 0.0
-            chosen_gems += discard
-            discards -= 1
         
         # Choose necessary takes
         while takes > 0:
@@ -164,8 +144,11 @@ class Player:
         return chosen_gems
 
     def get_legal_moves(self, board):
+        # Treat cards as gems
         effective_gems = self.gems.copy()
         effective_gems[:5] += self.cards
+
+        # Will append to this as we find legal moves
         legal_moves = []
 
         # Buy card
@@ -188,48 +171,40 @@ class Player:
                     elif can_afford_with_gold:
                         legal_moves.append(('buy with gold', (tier_index, card_index)))
 
-        # Buy reserved card
-        for card_index, card in enumerate(self.reserved_cards):
-            can_afford = can_afford_with_gold = True
-            gold_needed = 0
+        # Buy reserved card (simplified-Splendor modified)
+        # for card_index, card in enumerate(self.reserved_cards):
+        #     can_afford = can_afford_with_gold = True
+        #     gold_needed = 0
 
-            for gem_index, amount in enumerate(card.cost):
-                if effective_gems[gem_index] < amount:
-                    can_afford = False
-                    gold_needed += amount - effective_gems[gem_index]
-                    if gold_needed > effective_gems[5]:
-                        can_afford_with_gold = False
-                        break
+        #     for gem_index, amount in enumerate(card.cost):
+        #         if effective_gems[gem_index] < amount:
+        #             can_afford = False
+        #             gold_needed += amount - effective_gems[gem_index]
+        #             if gold_needed > effective_gems[5]:
+        #                 can_afford_with_gold = False
+        #                 break
 
-            if can_afford:
-                legal_moves.append(('buy reserved', (None, card_index)))
-            elif can_afford_with_gold:
-                legal_moves.append(('buy reserved with gold', (None, card_index)))
-
-        if len(legal_moves) > 0:
-            return legal_moves
+        #     if can_afford:
+        #         legal_moves.append(('buy reserved', (None, card_index)))
+        #     elif can_afford_with_gold:
+        #         legal_moves.append(('buy reserved with gold', (None, card_index)))
         
-        # Take gems
-        if sum(self.gems) < 10:
-            for gem, amount in enumerate(board.gems[:5]):
-                if amount:
-                    legal_moves.append(('take', (gem, 1)))
-                    if sum(self.gems) <= 8:  # We actually can take 2 if more than 8 but will need discard
-                        if amount >= 4:
-                            legal_moves.append(('take', (gem, 2)))
-        else: # Discard first, per take_tokens_loop logic
-            for gem, amount in enumerate(self.gems[:5]):
-                if amount:
-                    legal_moves.append(('take', (gem, -1)))
+        # Take gems (simplified-Splendor modified)
+        for gem, amount in enumerate(board.gems[:5]):
+            if amount:
+                legal_moves.append(('take', (gem, 1)))
+                if sum(self.gems) <= 8:  # We actually can take 2 if more than 8 but will need discard
+                    if amount >= 4:
+                        legal_moves.append(('take', (gem, 2)))
 
-        # Reserve card
-        if len(self.reserved_cards) < 3:
-            for tier_index, tier in enumerate(board.cards[:3]):
-                for card_index, card in enumerate(tier):
-                    if card:
-                        legal_moves.append(('reserve', (tier_index, card_index)))
-                if board.deck_mapping[tier_index].cards:
-                    legal_moves.append(('reserve top', (tier_index, None)))
+        # Reserve card (simplified-Splendor modified)
+        # if len(self.reserved_cards) < 3:
+        #     for tier_index, tier in enumerate(board.cards[:3]):
+        #         for card_index, card in enumerate(tier):
+        #             if card:
+        #                 legal_moves.append(('reserve', (tier_index, card_index)))
+        #         if board.deck_mapping[tier_index].cards:
+        #             legal_moves.append(('reserve top', (tier_index, None)))
         
         return legal_moves
 

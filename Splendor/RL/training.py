@@ -50,7 +50,7 @@ def ddqn_loop(paths, log_rate=0):
     game_lengths = []
 
     # Loop through games - can be stopped at any time
-    for episode in range(5000):
+    for episode in range(750):
         game.reset()
 
         # Enable logging
