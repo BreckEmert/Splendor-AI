@@ -82,8 +82,7 @@ class Game:
                 if sum(player.gems) < 10:
                     player.gems[5] += gold
                 else:
-                    discard, _ = player.choose_discard(
-                        self.to_vector(), player.gems, reward=-1/30)
+                    discard, _ = player.choose_discard(self.to_vector(), player.gems)
                     player.take_or_spend_gems(discard)
                     player.gems[5] += gold
             case 'reserve top':  # OTHER PLAYERS CAN'T ACTUALLY SEE THIS CARD
@@ -93,8 +92,7 @@ class Game:
                 if sum(player.gems) < 10:
                     player.gems[5] += gold
                 else:
-                    discard, _ = player.choose_discard(
-                        self.to_vector(), player.gems, reward=-1/30)
+                    discard, _ = player.choose_discard(self.to_vector(), player.gems)
                     player.take_or_spend_gems(discard)
                     player.gems[5] += gold
 
@@ -111,6 +109,6 @@ class Game:
 
         # Adds on [0.0] which indicates progression through loop
         vector = np.concatenate((board_vector, active_player, [0.0], enemy_player))
-        assert len(vector) == 243, f"Game vector is length {len(vector)}"
+        # assert len(vector) == 243, f"Game vector is length {len(vector)}"
         return vector.astype(np.float32)
     

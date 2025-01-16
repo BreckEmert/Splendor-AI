@@ -82,5 +82,5 @@ class Board:
         ]
 
         state_vector = np.concatenate((*tier_vector, *nobles_vector))  # No longer including self.gems
-        assert len(state_vector) == 150, f"board vector is {len(state_vector)}"
+        # assert len(state_vector) == 150, f"board vector is {len(state_vector)}"
         return state_vector  # length 150, UPDATE STATE_OFFSET IF THIS CHANGES

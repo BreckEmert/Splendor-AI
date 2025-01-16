@@ -50,7 +50,7 @@ def ddqn_loop(paths, log_rate=0):
     game_lengths = []
 
     # Loop through games - can be stopped at any time
-    for episode in range(5000):
+    for episode in range(750):  # Crashing after 750 now?
         game.reset()
 
         # Enable logging
@@ -68,6 +68,8 @@ def ddqn_loop(paths, log_rate=0):
             if logging:
                 json.dump(game.get_state(), log_state_file)
                 log_state_file.write('\n')
+        else:
+            game.active_player.model.memory[-2][2] -= 10  # Loser reward
 
         game_lengths.append(game.half_turns)
 
@@ -128,7 +130,7 @@ def find_fastest_game(paths, n_games, log_states=False):
             
             # Just because someone won doesn't mean it was a short enough win
             if game.victor:
-                if game.half_turns <= 54:
+                if game.half_turns <= 60:
                     print(f"Victory in {game.half_turns}, {len(completed_games)+1} completed games.")
                     for player in game.players:
                         if player.victor:
@@ -143,7 +145,7 @@ def find_fastest_game(paths, n_games, log_states=False):
                                         f.write('\n')
                 else:
                     # Hard reset if the game wasn't fast enough
-                    # print("Resetting, game was too long.", game.half_turns)
+                    print("Resetting, game was too long.", game.half_turns)
                     game = deepcopy(original_checkpoint)
                     for player in game.players:
                         player.model.reset()
