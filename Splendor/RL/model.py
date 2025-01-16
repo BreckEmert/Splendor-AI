@@ -30,7 +30,7 @@ class RLAgent:
 
         self.memory = self.load_memory()
 
-        self.gamma = 0.1  # 0.1**(1/25)
+        self.gamma = 0.9  # 0.1**(1/25)
         self.epsilon = 1.0
         self.epsilon_min = 0.04
         self.epsilon_decay = 0.995
@@ -166,12 +166,12 @@ class RLAgent:
                 tf.summary.histogram('Training Metrics/action_hist', actions, step=step)
                 tf.summary.scalar('Training Metrics/batch_loss', tf.reduce_mean(loss), step=step)
                 tf.summary.scalar('Training Metrics/epsilon', self.epsilon, step=step)
+                tf.summary.scalar('Training Metrics/avg_reward', tf.reduce_mean(rewards), step=step)  # Global average reward
 
 
                 # Q-Values
                 legal_qs = tf.where(tf.math.is_finite(qs), qs, tf.zeros_like(qs))  # Removes NaN and inf
                 tf.summary.scalar('Q-Values/avg_q', tf.reduce_mean(legal_qs), step=step)  # Global average q
-                tf.summary.scalar('Q-Values/avg_reward', tf.reduce_mean(rewards), step=step)  # Global average reward
 
                 tf.summary.scalar('Q-Values/avg_take_1', tf.reduce_mean(legal_qs[:5]), step=step)  # Take a single token (really 3)
                 tf.summary.scalar('Q-Values/avg_take_2', tf.reduce_mean(legal_qs[5:10]), step=step)  # Take two tokens of a single kind

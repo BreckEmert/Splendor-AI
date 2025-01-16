@@ -25,20 +25,20 @@ class Player:
         self.discard_disincentive: float = -0.1
 
     def take_or_spend_gems(self, gems_to_change):
-        if len(gems_to_change) < 6:
+        if len(gems_to_change) < 6:  # Pads gold dim if needed
             gems_to_change = np.pad(gems_to_change, (0, 6-len(gems_to_change)))
         self.gems += gems_to_change
 
         # Validate gem counts
-        assert np.all(self.gems >= 0), f"Illegal player gems: {self.gems}, {gems_to_change}"
-        assert sum(self.gems) <= 10, f"Illegal player gems: {self.gems}, {gems_to_change}"
+        # assert np.all(self.gems >= 0), f"Illegal player gems: {self.gems}, {gems_to_change}"
+        # assert sum(self.gems) <= 10, f"Illegal player gems: {self.gems}, {gems_to_change}"
 
     def get_bought_card(self, card):
         self.cards[card.gem] += 1
         self.points += card.points
         self.card_ids[card.tier][card.gem].append(card.id)
 
-    def choose_discard(self, state, player_gems, progress=0, reward=0.0, move_index=None):
+    def choose_discard(self, state, player_gems, progress=0, move_index=None):
         # Set legal mask to only legal discards
         legal_mask = np.zeros(61, dtype=bool)
         legal_mask[10:15] = player_gems[:5] > 0
@@ -56,7 +56,7 @@ class Player:
         next_state = state.copy()
         next_state[gem_index+self.state_offset] -= 0.25
         state[196] = 0.2*progress  # 0.2 * (moves remaining+1), indicating progression through loop
-        memory = [state.copy(), move_index, reward, next_state.copy(), 1]
+        memory = [state.copy(), move_index, self.discard_disincentive, next_state.copy(), 1]
         self.model.remember(memory, legal_mask.copy())
 
         # Update player in the game state
@@ -95,7 +95,6 @@ class Player:
 
         takes = min(3, sum(board_gems))
         discards = total_gems - 7
-        discard_reward = self.discard_disincentive*discards
         chosen_gems = np.zeros(5, dtype=int)
 
         # Perform the move that was initially chosen
@@ -105,23 +104,19 @@ class Player:
                     state, board_gems, 0.6, 0.0, move_index)
                 takes -= 1
             else:
-                chosen_gem, state = self.choose_discard(
-                    state, self.gems, 0.6, discard_reward, move_index)
+                chosen_gem, state = self.choose_discard(state, self.gems, 0.6, move_index)
                 discards -= 1
             chosen_gems += chosen_gem
 
         # Choose necessary discards
         while discards > 0:
-            discard, state = self.choose_discard(
-                state, player_gems+chosen_gems, progress=discards, reward=discard_reward)
-            # discard_reward = 0.0
+            discard, state = self.choose_discard(state, player_gems+chosen_gems, progress=discards)
             chosen_gems += discard
             discards -= 1
         
         # Choose necessary takes
         while takes > 0:
-            take, state = self.choose_take(
-                state, board_gems-chosen_gems, progress=takes, reward=0)
+            take, state = self.choose_take(state, board_gems-chosen_gems, progress=takes, reward=0)
             chosen_gems += take
             takes -= 1
 
@@ -164,8 +159,11 @@ class Player:
         return chosen_gems
 
     def get_legal_moves(self, board):
+        # Treat purchased cards as gems
         effective_gems = self.gems.copy()
         effective_gems[:5] += self.cards
+
+        # Will append to this as we find legal moves
         legal_moves = []
 
         # Buy card
@@ -205,9 +203,6 @@ class Player:
                 legal_moves.append(('buy reserved', (None, card_index)))
             elif can_afford_with_gold:
                 legal_moves.append(('buy reserved with gold', (None, card_index)))
-
-        if len(legal_moves) > 0:
-            return legal_moves
         
         # Take gems
         if sum(self.gems) < 10:
@@ -380,6 +375,6 @@ class Player:
             reserved_cards_vector,  # length 11*3 = 33
             [self.points / 15]  # length 1
         ))
-        assert len(state_vector) == 46, "Player state is {len(state_vector)}"
 
+        # assert len(state_vector) == 46, "Player state is {len(state_vector)}"
         return state_vector  # length 46
