@@ -82,8 +82,7 @@ class Game:
                 if sum(player.gems) < 10:
                     player.gems[5] += gold
                 else:
-                    discard, _ = player.choose_discard(
-                        self.to_vector(), player.gems, reward=-1/30)
+                    discard, _ = player.choose_discard(self.to_vector(), player.gems)
                     player.take_or_spend_gems(discard)
                     player.gems[5] += gold
             case 'reserve top':  # OTHER PLAYERS CAN'T ACTUALLY SEE THIS CARD
@@ -93,8 +92,7 @@ class Game:
                 if sum(player.gems) < 10:
                     player.gems[5] += gold
                 else:
-                    discard, _ = player.choose_discard(
-                        self.to_vector(), player.gems, reward=-1/30)
+                    discard, _ = player.choose_discard(self.to_vector(), player.gems)
                     player.take_or_spend_gems(discard)
                     player.gems[5] += gold
 

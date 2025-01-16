@@ -64,10 +64,11 @@ def ddqn_loop(paths, log_rate=0):
         # Play a game
         while not game.victor:
             game.turn()
-
             if logging:
                 json.dump(game.get_state(), log_state_file)
                 log_state_file.write('\n')
+        else:
+            game.active_player.model.memory[-2][2] -= 10
 
         game_lengths.append(game.half_turns)
 

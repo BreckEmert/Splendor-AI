@@ -34,7 +34,7 @@ class Player:
         self.points += card.points
         self.card_ids[card.tier][card.gem].append(card.id)
 
-    def choose_discard(self, state, player_gems, progress=0, reward=0.0, move_index=None):
+    def choose_discard(self, state, player_gems, progress=0, move_index=None):
         # Set legal mask to only legal discards
         legal_mask = np.zeros(61, dtype=bool)
         legal_mask[10:15] = player_gems[:5] > 0
@@ -52,7 +52,7 @@ class Player:
         next_state = state.copy()
         next_state[gem_index+self.state_offset] -= 0.25
         state[196] = 0.2*progress  # 0.2 * (moves remaining+1), indicating progression through loop
-        memory = [state.copy(), move_index, reward, next_state.copy(), 1]
+        memory = [state.copy(), move_index, self.discard_disincentive, next_state.copy(), 1]
         self.model.remember(memory, legal_mask.copy())
 
         # Update player in the game state
