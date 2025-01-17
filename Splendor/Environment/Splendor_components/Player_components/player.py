@@ -38,90 +38,6 @@ class Player:
         self.points += card.points
         self.card_ids[card.tier][card.gem].append(card.id)
 
-    def choose_discard(self, state, player_gems, progress=0, move_index=None):
-        # Set legal mask to only legal discards
-        legal_mask = np.zeros(61, dtype=bool)
-        legal_mask[10:15] = player_gems[:5] > 0
-
-        if not move_index:
-            # Call the model to choose a discard
-            rl_moves = self.model.get_predictions(state, legal_mask)
-            move_index = np.argmax(rl_moves)
-
-        gem_index = move_index - 10
-        discard = np.zeros(5, dtype=int)
-        discard[gem_index] = -1
-
-        # Remember
-        next_state = state.copy()
-        next_state[gem_index+self.state_offset] -= 0.25
-        state[196] = 0.2*progress  # 0.2 * (moves remaining+1), indicating progression through loop
-        memory = [state.copy(), move_index, self.discard_disincentive, next_state.copy(), 1]
-        self.model.remember(memory, legal_mask.copy())
-
-        # Update player in the game state
-        state = next_state.copy()
-
-        return discard, state
-
-    def choose_take(self, state, available_gems, progress, reward=0.0, take_index=None):
-        # Set legal mask to only legal takes
-        legal_mask = np.zeros(61, dtype=bool)
-        legal_mask[:5] = available_gems > 0
-
-        if not take_index:
-            # Call the model to choose a take
-            rl_moves = self.model.get_predictions(state, legal_mask)
-            take_index = np.argmax(rl_moves)
-        
-        take = np.zeros(5, dtype=int)
-        take[take_index] = 1
-
-        # Remember
-        next_state = state.copy()
-        next_state[take_index+self.state_offset] += 0.25
-        state[196] = progress  # 0.2 * (moves remaining+1), indicating progression through loop
-        memory = [state.copy(), take_index, reward, next_state.copy(), 1]
-        self.model.remember(memory, legal_mask.copy())
-
-        return take, next_state
-
-    def take_tokens_loop(self, state, board_gems, move_index=None):
-        player_gems = self.gems[:5].copy()
-        total_gems = sum(self.gems)
-        board_gems = (board_gems>0).astype(int)
-
-        state = state.copy()
-
-        takes = min(3, sum(board_gems))
-        discards = total_gems - 7
-        chosen_gems = np.zeros(5, dtype=int)
-
-        # Perform the move that was initially chosen
-        if move_index:
-            if move_index < 5:
-                chosen_gem, state = self.choose_take(
-                    state, board_gems, 0.6, 0.0, move_index)
-                takes -= 1
-            else:
-                chosen_gem, state = self.choose_discard(state, self.gems, 0.6, move_index)
-                discards -= 1
-            chosen_gems += chosen_gem
-
-        # Choose necessary discards
-        while discards > 0:
-            discard, state = self.choose_discard(state, player_gems+chosen_gems, progress=discards)
-            chosen_gems += discard
-            discards -= 1
-        
-        # Choose necessary takes
-        while takes > 0:
-            take, state = self.choose_take(state, board_gems-chosen_gems, progress=takes, reward=0)
-            chosen_gems += take
-            takes -= 1
-
-        return chosen_gems
-
     def buy_with_gold_loop(self, next_state, move_index, card):
         starting_gems = self.gems.copy()
         chosen_gems = np.zeros(6, dtype=int)
@@ -158,7 +74,30 @@ class Player:
 
         return chosen_gems
 
-    def get_legal_moves(self, board):
+    def get_legal_takes(self, board):  # DOES THIS NEED ALL OF BOARD?  OR JUST GEMS?
+        import tensorflow as tf
+        import itertools as it
+        n_gems = self.gems.sum()
+        discards = 13 - self.gems.sum()
+
+        # Take two of the same
+        take_3_diff = list(it.combinations(range(n_gems), 3))
+        take_3_diff = tf.constant(take_2_diff, dtype=tf.int8)
+        take_2_same = np.eye()*2
+        take_2_same = (take_2_same, board.gems >= 4)
+        takes = take_2_diff.extend(take_2_same)
+
+        # NEED TO ACCOUNT FOR TAKE 2 OF SAME.... CANT DISCARD 3 for that
+        # Probably just filter afterwards for net takes with bad sum
+        n_discards = 13 - self.gems.sum()
+        discards = list(it.combinations_with_replacement(range(n_gems), n_discards))
+        discards = tf.constant(discards, dtype=tf.int8)
+
+        # Filter to where valid board takes
+
+        # Filter to where valid discards
+
+    def get_legal_moves(self, board):  # DOES THIS NEED ALL OF BOARD?  OR JUST GEMS?
         # Treat purchased cards as gems
         effective_gems = self.gems.copy()
         effective_gems[:5] += self.cards
@@ -205,17 +144,11 @@ class Player:
                 legal_moves.append(('buy reserved with gold', (None, card_index)))
         
         # Take gems
-        if sum(self.gems) < 10:
-            for gem, amount in enumerate(board.gems[:5]):
-                if amount:
-                    legal_moves.append(('take', (gem, 1)))
-                    if sum(self.gems) <= 8:  # We actually can take 2 if more than 8 but will need discard
-                        if amount >= 4:
-                            legal_moves.append(('take', (gem, 2)))
-        else: # Discard first, per take_tokens_loop logic
-            for gem, amount in enumerate(self.gems[:5]):
-                if amount:
-                    legal_moves.append(('take', (gem, -1)))
+        legal_moves.append(self.get_legal_takes)
+        
+        # First, use the discards variable to get possible discards
+        # This would be the player's inventory.  Can we find a way to 
+        # just tack on the actual move onto a static set of discards?
 
         # Reserve card
         if len(self.reserved_cards) < 3:
