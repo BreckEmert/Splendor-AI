@@ -10,6 +10,7 @@ from RL import RLAgent, RandomAgent
 
 
 def debug_game(paths):
+    """DEPRECATED, FOR NOW"""
     # Make logging directories
     states_log_dir = os.path.dirname(paths['states_log_dir'])
     states_log_dir = os.path.join(states_log_dir, "debug")
@@ -29,7 +30,7 @@ def debug_game(paths):
         while not game.victor:
             game.turn()
 
-            json.dump(game.get_state(), log_state)
+            json.dump(game.to_state_vector(), log_state)
             log_state.write('\n')
         # show_game_rewards(game.players)
 
@@ -66,7 +67,7 @@ def ddqn_loop(paths, log_rate=0):
             game.turn()
 
             if logging:
-                json.dump(game.get_state(), log_state_file)
+                json.dump(game.to_state_vector(), log_state_file)
                 log_state_file.write('\n')
         else:
             game.active_player.model.memory[-2][2] -= 10  # Loser reward
@@ -126,7 +127,7 @@ def find_fastest_game(paths, n_games, log_states=False):
         while not completed_quickly:
             for _ in range(2):
                 game.turn()
-                game.state_history.append(game.get_state())
+                game.state_history.append(game.to_state_vector())
             
             # Just because someone won doesn't mean it was a short enough win
             if game.victor:
