@@ -10,9 +10,10 @@ class Player:
     def __init__(self, name, model):
         self.name: str = name
         self.model = model
-        self.state_offset: int = 150
+        self.action_dim = 400  # Guessing lol
+        # self.state_offset: int = 150  # No longer needed?  action_dim-1 maybe?
         self.reset()
-        self._initialize_all_takes_and_discards()
+        self._initialize_all_takes()
     
     def reset(self):
         self.gems: np.ndarray = np.zeros(6, dtype=int)  # Gold gem so 6
@@ -27,33 +28,30 @@ class Player:
 
         self.discard_disincentive: float = -0.1
 
-    def _initialize_all_takes_and_discards(self):
-        """Preloads all possible take and discard indices that
-        can be filtered and combined during gameplay.  Avoids 
+    def _initialize_all_takes(self):
+        """Preloads all possible take indices that can 
+        be filtered and combined during gameplay.  Avoids 
         a lot of recalculation each turn.
         """
-        # All takes
+        # Take 3
         take_3 = list(it.combinations(range(5), 3))
         take_3 = tf.constant(take_3, dtype=tf.int32)
         take_3 = tf.one_hot(take_3, depth=5, axis=-1, dtype=tf.int32)
         take_3 = tf.reduce_sum(take_3, axis=1)
-        self.all_takes_3_diff = take_3
+        self.all_takes_3 = take_3
 
-        self.all_takes_2_same = tf.eye(5, dtype=tf.int8)*2
+        # Take 2
+        take_2_diff = list(it.combinations(range(5), 2))
+        take_2_diff = tf.constant(take_2_diff, dtype=tf.int32)
+        take_2_diff = tf.one_hot(take_2_diff, depth=5, axis=-1, dtype=tf.int32)
+        take_2_diff = tf.reduce_sum(take_2_diff, axis=1)
 
-        # All discards
-        self.all_discards = tf.zeros([0, 5], dtype=tf.int8)
-        self.discard_sums = tf.zeros([0], dtype=tf.int8)
+        take_2_same = tf.eye(5, dtype=tf.int8)*2
 
-        for k in range(1, 4):
-            discard_k = list(it.combinations_with_replacement(range(5), k))
-            discard_k = tf.constant(discard_k, dtype=tf.int8)
-            discard_k = tf.one_hot(discard_k, depth=5, axis=-1, dtype=tf.int8)
-            discard_k = tf.reduce_sum(discard_k, axis=1)
+        self.all_takes_2 = tf.concat([take_2_diff, take_2_same], axis=0)
 
-            self.all_discards = tf.concat([self.all_discards, discard_k], axis=0)
-            sums_k = tf.fill([discard_k.length, k])
-            self.discard_sums = tf.concat([self.discard_sums, sums_k], axis=0)
+        # Take 1
+        self.all_takes_1 = tf.eye(5, dtype=tf.int8)
 
     def take_or_spend_gems(self, gems_to_change):
         if len(gems_to_change) < 6:  # Pads gold dim if needed
@@ -105,31 +103,70 @@ class Player:
 
         return chosen_gems
 
+    def _auto_discard(self, legal_takes, n_discards):
+        if n_discards:
+            net_takes = []
+            for take in legal_takes.numpy():
+                net_take = self._auto_discard(self.gems[:5], take, n_discards)
+                # 1) apply 
+                net_takes.append(net_take)
+            net_takes = tf.to_tensor(net_takes)  # Don't know how to handle this
+        else:
+            net_takes = legal_takes
+
+        return net_takes
+
+    def _scatter_legal_takes(self, legal_action_mask, board_mask, n_discards, offset):
+        """Updates the legal action mask that will filter model 
+        actions based on what's legal to take from the board
+        """
+        # Get the corresponding all_takes indices to the legal moves we found
+        # (need a stable vector for the model)
+        legal_indices = tf.where(board_mask)
+        legal_indices = tf.reshape(legal_indices, [-1])  # Flatten
+
+        # Now we can actually update the legal_action_mask
+        action_indices = offset + legal_indices*n_discards + n_discards  # broadcast using stride=4
+        action_indices = tf.expand_dims(action_indices, axis=1)  # expand back for scattering
+        action_updates = tf.ones_like(action_indices, dtype=tf.bool)  # True where the indices are
+        legal_action_mask = tf.tensor_scatter_nd_update(legal_action_mask, action_indices, action_updates)
+
+        return legal_action_mask
+
     def get_legal_takes(self, board_gems):
         n_gems = self.gems.sum()
         n_discards = 13 - n_gems
         board_gems = tf.constant(board_gems[:5], dtype=tf.int8)
-        player_gems = tf.constant(self.gems[:5], dtype=tf.int8)
+        legal_action_mask = tf.zeros([self.action_dim], dtype=tf.bool)
+        offset = 0  # Offsets updates to legal_action_mask, increasing as we go
 
-        # Filter taking 3 different gems where board has any
-        board_gt0_mask = tf.cast(board_gems > 0, tf.int8)
-        legal_takes_3_diff = tf.reduce_all(self.all_takes_3_diff <= board_gt0_mask, axis=1)
-        legal_takes_3_diff = tf.boolean_mask(self.all_takes_3_diff, legal_takes_3_diff)
+        """TAKE 3"""
+        # Filter self.all_takes_3 to where the board actually has gems
+        board_gt0_mask = tf.cast(board_gems > 0, tf.int8)  # Board > 0 indicator
+        takes_ltboard_mask = tf.reduce_all(self.all_takes_3 <= board_gt0_mask, axis=1)
+        legal_action_mask = self._scatter_legal_takes(legal_action_mask, takes_ltboard_mask, n_discards, offset)
+        offset += tf.shape(takes_ltboard_mask)[0]
 
-        # Filter taking 2 of the same gem where board has at least 4
-        board_gt4_mask = tf.greater_equal(board_gems, 4)
-        legal_takes_2_same = tf.boolean_mask(self.all_takes_2_same, board_gt4_mask)
+        """TAKE 2 - SAME"""
+        # Filter self.all_takes_2_same to where the board has at least 4 gems of a color
+        board_gt4_mask = tf.greater_equal(board_gems, 4)  # Board >= 4 indicator
+        takes_gtboard_mask = tf.reduce_any(self.all_takes_2 <= board_gt4_mask, axis=1)
+        legal_action_mask = self._scatter_legal_takes(legal_action_mask, takes_gtboard_mask, n_discards)
+        offset += tf.shape(takes_gtboard_mask)[0]
 
-        # Complete list of legal takes
-        legal_takes = tf.concat([legal_takes_3_diff, legal_takes_2_same], axis=0)
-        
-        # Calculate the player gems after each legal take
-        net_takes = legal_takes + player_gems
+        """TAKE 2 - DIFFERENT"""
+        # Filter self.all_takes_2_diff to where the board has any gems
+        takes_ltboard_mask = tf.reduce_all(self.all_takes_2_diff <= board_gt0_mask, axis=1)
+        legal_action_mask = self._scatter_legal_takes(legal_action_mask, takes_ltboard_mask, n_discards)
+        offset += tf.shape(takes_ltboard_mask)[0]
 
-        # Filter to where the discards are <= net_takes FIX THIS COMMENT
-        
+        """TAKE 1"""
+        # Filter self.all_takes_1 to where the board has any gems
+        takes_ltboard_mask = tf.reduce_all(self.all_takes_1 <= board_gt0_mask, axis=1)
+        legal_action_mask = self._scatter_legal_takes(legal_action_mask, takes_ltboard_mask, n_discards)
 
-
+        """Complete list of legal takes"""
+        return legal_action_mask
 
     def get_legal_moves(self, board):
         # Treat purchased cards as gems
