@@ -2,6 +2,8 @@
 
 import copy
 import numpy as np
+import itertools as it
+import tensorflow as tf
 
 
 class Player:
@@ -10,6 +12,7 @@ class Player:
         self.model = model
         self.state_offset: int = 150
         self.reset()
+        self._initialize_all_takes_and_discards()
     
     def reset(self):
         self.gems: np.ndarray = np.zeros(6, dtype=int)  # Gold gem so 6
@@ -23,6 +26,34 @@ class Player:
         self.move_index: int = 9999  # Set to impossible to avoid confusion
 
         self.discard_disincentive: float = -0.1
+
+    def _initialize_all_takes_and_discards(self):
+        """Preloads all possible take and discard indices that
+        can be filtered and combined during gameplay.  Avoids 
+        a lot of recalculation each turn.
+        """
+        # All takes
+        take_3 = list(it.combinations(range(5), 3))
+        take_3 = tf.constant(take_3, dtype=tf.int32)
+        take_3 = tf.one_hot(take_3, depth=5, axis=-1, dtype=tf.int32)
+        take_3 = tf.reduce_sum(take_3, axis=1)
+        self.all_takes_3_diff = take_3
+
+        self.all_takes_2_same = tf.eye(5, dtype=tf.int8)*2
+
+        # All discards
+        self.all_discards = tf.zeros([0, 5], dtype=tf.int8)
+        self.discard_sums = tf.zeros([0], dtype=tf.int8)
+
+        for k in range(1, 4):
+            discard_k = list(it.combinations_with_replacement(range(5), k))
+            discard_k = tf.constant(discard_k, dtype=tf.int8)
+            discard_k = tf.one_hot(discard_k, depth=5, axis=-1, dtype=tf.int8)
+            discard_k = tf.reduce_sum(discard_k, axis=1)
+
+            self.all_discards = tf.concat([self.all_discards, discard_k], axis=0)
+            sums_k = tf.fill([discard_k.length, k])
+            self.discard_sums = tf.concat([self.discard_sums, sums_k], axis=0)
 
     def take_or_spend_gems(self, gems_to_change):
         if len(gems_to_change) < 6:  # Pads gold dim if needed
@@ -74,30 +105,33 @@ class Player:
 
         return chosen_gems
 
-    def get_legal_takes(self, board):  # DOES THIS NEED ALL OF BOARD?  OR JUST GEMS?
-        import tensorflow as tf
-        import itertools as it
+    def get_legal_takes(self, board_gems):
         n_gems = self.gems.sum()
-        discards = 13 - self.gems.sum()
+        n_discards = 13 - n_gems
+        board_gems = tf.constant(board_gems[:5], dtype=tf.int8)
+        player_gems = tf.constant(self.gems[:5], dtype=tf.int8)
 
-        # Take two of the same
-        take_3_diff = list(it.combinations(range(n_gems), 3))
-        take_3_diff = tf.constant(take_2_diff, dtype=tf.int8)
-        take_2_same = np.eye()*2
-        take_2_same = (take_2_same, board.gems >= 4)
-        takes = take_2_diff.extend(take_2_same)
+        # Filter taking 3 different gems where board has any
+        board_gt0_mask = tf.cast(board_gems > 0, tf.int8)
+        legal_takes_3_diff = tf.reduce_all(self.all_takes_3_diff <= board_gt0_mask, axis=1)
+        legal_takes_3_diff = tf.boolean_mask(self.all_takes_3_diff, legal_takes_3_diff)
 
-        # NEED TO ACCOUNT FOR TAKE 2 OF SAME.... CANT DISCARD 3 for that
-        # Probably just filter afterwards for net takes with bad sum
-        n_discards = 13 - self.gems.sum()
-        discards = list(it.combinations_with_replacement(range(n_gems), n_discards))
-        discards = tf.constant(discards, dtype=tf.int8)
+        # Filter taking 2 of the same gem where board has at least 4
+        board_gt4_mask = tf.greater_equal(board_gems, 4)
+        legal_takes_2_same = tf.boolean_mask(self.all_takes_2_same, board_gt4_mask)
 
-        # Filter to where valid board takes
+        # Complete list of legal takes
+        legal_takes = tf.concat([legal_takes_3_diff, legal_takes_2_same], axis=0)
+        
+        # Calculate the player gems after each legal take
+        net_takes = legal_takes + player_gems
 
-        # Filter to where valid discards
+        # Filter to where the discards are <= net_takes FIX THIS COMMENT
+        
 
-    def get_legal_moves(self, board):  # DOES THIS NEED ALL OF BOARD?  OR JUST GEMS?
+
+
+    def get_legal_moves(self, board):
         # Treat purchased cards as gems
         effective_gems = self.gems.copy()
         effective_gems[:5] += self.cards
@@ -125,7 +159,7 @@ class Player:
                     elif can_afford_with_gold:
                         legal_moves.append(('buy with gold', (tier_index, card_index)))
 
-        # Buy reserved card
+        # Buy a reserved card
         for card_index, card in enumerate(self.reserved_cards):
             can_afford = can_afford_with_gold = True
             gold_needed = 0
@@ -144,13 +178,9 @@ class Player:
                 legal_moves.append(('buy reserved with gold', (None, card_index)))
         
         # Take gems
-        legal_moves.append(self.get_legal_takes)
-        
-        # First, use the discards variable to get possible discards
-        # This would be the player's inventory.  Can we find a way to 
-        # just tack on the actual move onto a static set of discards?
+        legal_moves.append(self.get_legal_takes(board.gems))
 
-        # Reserve card
+        # Reserve a card
         if len(self.reserved_cards) < 3:
             for tier_index, tier in enumerate(board.cards[:3]):
                 for card_index, card in enumerate(tier):
