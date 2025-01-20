@@ -10,8 +10,7 @@ class Player:
     def __init__(self, name, model):
         self.name: str = name
         self.model = model
-        self.action_dim = 400  # Guessing lol
-        # self.state_offset: int = 150  # No longer needed?  action_dim-1 maybe?
+        self.action_dim = 165
         self.reset()
         self._initialize_all_takes()
     
@@ -20,8 +19,7 @@ class Player:
         self.cards: np.ndarray = np.zeros(5, dtype=int)  # No gold card so 5
         self.reserved_cards: list = []
 
-        self.card_ids: list = [[[], [], [], [], []], [[], [], [], [], []], 
-                               [[], [], [], [], []], [[], [], [], [], []]]
+        self.card_ids: list = [[[] for _ in range(5)] for _ in range(4)]
         self.victor: bool = False
 
     def _initialize_all_takes(self):
@@ -41,43 +39,69 @@ class Player:
         take_2_diff = tf.constant(take_2_diff, dtype=tf.int32)
         take_2_diff = tf.one_hot(take_2_diff, depth=5, axis=-1, dtype=tf.int32)
         take_2_diff = tf.reduce_sum(take_2_diff, axis=1)
+        self.all_takes_2_diff = take_2_diff
 
-        take_2_same = tf.eye(5, dtype=tf.int8)*2
-
-        self.all_takes_2 = tf.concat([take_2_diff, take_2_same], axis=0)
+        self.all_takes_2_same = tf.eye(5, dtype=tf.int8)*2
 
         # Take 1
         self.all_takes_1 = tf.eye(5, dtype=tf.int8)
-
-    def take_or_spend_gems(self, gems_to_change):
-        if len(gems_to_change) < 6:  # Pads gold dim if needed
-            gems_to_change = np.pad(gems_to_change, (0, 6-len(gems_to_change)))
-        self.gems += gems_to_change
-
-        # Validate gem counts
-        # assert np.all(self.gems >= 0), f"Illegal player gems: {self.gems}, {gems_to_change}"
-        # assert sum(self.gems) <= 10, f"Illegal player gems: {self.gems}, {gems_to_change}"
 
     def get_bought_card(self, card):
         self.cards[card.gem] += 1
         self.points += card.points
         self.card_ids[card.tier][card.gem].append(card.id)
 
-    def _auto_spend_gold():
-        pass
+    def _auto_spend(self, card_cost):
+        """For now, random spend logic.  Modifies player gems 
+        IN PLACE.  Also ENSURE that this and other methods 
+        recieve .copy() objects, as this does modify card_cost.
+        """
+        spent_gems = np.zeros(6, dtype=np.int8)
+        card_cost -= self.cards
+        card_cost = np.max(card_cost, 0)
+        
+        for index, gem_count in enumerate(card_cost):
+            while gem_count > 0:
+                # If we have a gem of that color, spend it
+                if self.gems[index] > 0:
+                    self.gems[index] -= 1
+                    spent_gems[index] += 1
+                    card_cost[index] -= 1
+                    continue
+                
+                # Otherwise pay with gold
+                self.gems[5] -= 1
+                spent_gems[5] += 1
+                gem_count -= 1
 
-    def _auto_discard(self, legal_takes, n_discards):
-        if n_discards:
-            net_takes = []
-            for take in legal_takes.numpy():
-                net_take = self._auto_discard(self.gems[:5], take, n_discards)
-                # 1) apply 
-                net_takes.append(net_take)
-            net_takes = tf.to_tensor(net_takes)  # Don't know how to handle this
-        else:
-            net_takes = legal_takes
+        return spent_gems
 
-        return net_takes
+    def _auto_discard(self, gems_to_take):
+        """For now, random discard logic.  Good logic could be 
+        cosine similarity of gross gems with all card costs!!
+        """
+        player_gems = self.gems[:5].copy()
+        n_discards = max(0, 7 - self.gems.sum() - gems_to_take.sum())
+
+        discards = np.zeros(5, dtype=np.int8)
+        while discards.sum() < n_discards:
+            # Preferred discards that don't obstruct with what we took
+            discard_prefs = player_gems * (1-gems_to_take)  # Or a bitwise inversion?
+            discard_prefs_mask = np.where(discard_prefs > 0)[0]
+            if discard_prefs_mask.size > 0:
+                random_choice = np.random.choice(discard_prefs_mask)
+                player_gems[random_choice] -= 1
+                discards[random_choice] += 1
+                continue
+            
+            # Otherwise discard gems we took
+            discard_mask = np.where(player_gems > 0)[0]
+            random_choice = np.random.choice(discard_mask)
+
+            player_gems[random_choice] -= 1
+            discards[random_choice] += 1
+
+        return discards
 
     def _scatter_legal_takes(self, legal_action_mask, board_mask, n_discards, offset):
         """Updates the legal action mask that will filter model 
@@ -115,7 +139,7 @@ class Player:
         """TAKE 2 - SAME"""
         # Filter self.all_takes_2_same to where the board has at least 4 gems of a color
         board_gt4_mask = tf.greater_equal(board_gems, 4)  # Board >= 4 indicator
-        takes_gtboard_mask = tf.reduce_any(self.all_takes_2 <= board_gt4_mask, axis=1)
+        takes_gtboard_mask = tf.reduce_any(self.all_takes_2 <= board_gt4_mask, axis=1)  # WANT TO TEST WETHER ANY IS NEEDED....
         legal_take_mask = self._scatter_legal_takes(legal_take_mask, takes_gtboard_mask, n_discards, offset)
         offset += tf.shape(takes_gtboard_mask)[0]
 
@@ -194,37 +218,33 @@ class Player:
 
         if len(self.reserved_cards) < 3:
             for tier_index, tier in enumerate(board.cards[:3]):
-                for card_index, card in enumerate(tier):
-                    if card:
-                        legal_reserve_mask.append(True)
-                    else:
-                        legal_reserve_mask.append(False)
-                if board.deck_mapping[tier_index].cards:
-                    legal_reserve_mask.append(True)
-                else:
-                    legal_reserve_mask.append(False)
+                for card in tier:
+                    legal_reserve_mask.append(bool(card))
+                remaining_deck = board.deck_mapping[tier_index].cards
+                legal_reserve_mask.append(bool(remaining_deck))
         
         length = len(legal_reserve_mask)
         assert length == 12, f"legal_reserve_mask is length {length}"
         return legal_reserve_mask
 
     def _get_legal_moves(self, board):
+        # Take gems
+        legal_take_mask = self._get_legal_takes(board.gems)
+        legal_take_mask = tf.constant(legal_take_mask, dtype=tf.bool)
+
         # Buy card
         legal_buy_mask = self._get_legal_buys(board.cards)
         legal_buy_mask = tf.constant(legal_buy_mask, dtype=tf.bool)
-        
-        # Take gems
-        legal_take_mask = self._get_legal_takes(board.gems)
-        legal_take_mask = tf.constant(legal_buy_mask, dtype=tf.bool)
 
         # Reserve card
         legal_reserve_mask = self._get_legal_reserves(board)
-        legal_reserve_mask = tf.constant(legal_buy_mask, dtype=tf.bool)
+        legal_reserve_mask = tf.constant(legal_reserve_mask, dtype=tf.bool)
         
         legal_action_mask = tf.concat(
-            [legal_buy_mask, legal_take_mask, legal_reserve_mask], 
+            [legal_take_mask, legal_buy_mask, legal_reserve_mask], 
             axis=0
         )
+        print("Length of legal moves: ", len(legal_action_mask))
         return legal_action_mask
 
     def choose_move(self, board, state):
