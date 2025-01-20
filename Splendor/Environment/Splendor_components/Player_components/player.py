@@ -47,6 +47,9 @@ class Player:
         self.all_takes_1 = tf.eye(5, dtype=tf.int8)
 
     def get_bought_card(self, card):
+        """Handles all buying on the player's endexcept for 
+        the gems, which is handled by _auto_discard.
+        """
         self.cards[card.gem] += 1
         self.points += card.points
         self.card_ids[card.tier][card.gem].append(card.id)
@@ -77,10 +80,11 @@ class Player:
         return spent_gems
 
     def _auto_discard(self, gems_to_take):
-        """For now, random discard logic.  Good logic could be 
-        cosine similarity of gross gems with all card costs!!
+        """For now, random discard logic.  Modifies self.gems
+        IN PLACE.  Good logic could be cosine similarity of 
+        gross gems with all card costs!!
         """
-        player_gems = self.gems[:5].copy()
+        player_gems = self.gems[:5]
         n_discards = max(0, 7 - self.gems.sum() - gems_to_take.sum())
 
         discards = np.zeros(5, dtype=np.int8)

@@ -53,7 +53,7 @@ class Game:
         # Buy card moves
         elif chosen_move_index < 150:
             if chosen_move_index < 144:  # Buy from a tier, 120 + 12*2
-                idx = (chosen_move_index-120) // 2
+                idx = (chosen_move_index-120) // 2  chatgpt says there's 4 tiers here?
                 bought_card = board.take_card(idx//4, idx%3)  # Tier, card idx
             else:  # Buy reserved, 3*2
                 card_index = (chosen_move_index - 144) % 3
