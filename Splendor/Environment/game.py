@@ -31,7 +31,7 @@ class Game:
         self.apply_move(chosen_move_index)
         # DONT FORGET TO DO self.victor IN self.apply_move
 
-        self.half_turns += 1
+        self.half_turns += 1  # Increments even if .victor...
 
     def apply_move(self, chosen_move_index):
         reward = 0
@@ -42,29 +42,37 @@ class Game:
             if chosen_move_index < 40: # all_takes_3*(4 discard permutations)
                 gems_to_take = player.all_takes_3[chosen_move_index]
             elif chosen_move_index < 80: # all_takes_2_diff*4
-                gems_to_take = player.all_takes_2_diff[chosen_move_index]
+                gems_to_take = player.all_takes_2_diff[chosen_move_index-40]
             elif chosen_move_index < 100: # all_takes_2_same*4
-                gems_to_take = player.all_takes_2_same[chosen_move_index]
+                gems_to_take = player.all_takes_2_same[chosen_move_index-80]
             else: # < 120, all_takes_1
-                gems_to_take = player.all_takes_1[chosen_move_index]
+                gems_to_take = player.all_takes_1[chosen_move_index-100]
 
             net_gems = player._auto_discard(gems_to_take)
-            board.take_or_return_gems(net_gems)
+            board.take_gems(net_gems)
         # Buy card moves
         elif chosen_move_index < 150:
             if chosen_move_index < 144:  # Buy from a tier, 120 + 12*2
-                idx = (chosen_move_index-120) // 2  chatgpt says there's 4 tiers here?
-                bought_card = board.take_card(idx//4, idx%3)  # Tier, card idx
+                idx = (chosen_move_index-120) // 2
+                bought_card = board.take_card(idx//4, idx%4)  # Tier, card idx
             else:  # Buy reserved, 3*2
                 card_index = (chosen_move_index - 144) % 3
                 bought_card = player.reserved_cards.pop(card_index)
             
-            spent_gems = player._auto_spend(bought_card)  # Spends in-place
+            # Player spends the tokens
+            if not chosen_move_index % 2:  # All odd indices are gold spends
+                player._auto_spend_gold(bought_card)  # Spends in-place
+            else:
+                player.gems[:5] -= bought_card.cost
+
+            # Board gets them back
+            board.return_gems(-bought_card.cost)
+            
+            # Player gets the card
             player.get_bought_card(bought_card)
-            board.take_or_return_gems(spent_gems)
 
             """Noble visit and end-of-game"""
-            reward = bought_card.cost
+            reward = bought_card.points
             if self.check_noble_visit(player):
                 reward += 3
             if player.points >= 15:
@@ -88,12 +96,13 @@ class Game:
         return reward
 
     def check_noble_visit(self, player):
-        for index, noble in enumerate(self.board.cards[3]):
+        visited = False
+        for index, noble in enumerate(self.board.nobles):
             if noble and np.all(player.cards >= noble.cost):
-                self.board.cards[3][index] = None
+                self.board.nobles[index] = None
                 player.points += 3
-                return True  # No logic to tie-break, seems too insignificant for training
-        return False
+                visited = True  # No logic to tie-break, seems too insignificant for training
+        return visited
     
     def to_state_vector(self):
         board_vector = self.board.to_state_vector()  # length 150

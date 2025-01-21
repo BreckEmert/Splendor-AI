@@ -24,8 +24,8 @@ class RLAgent:
         enable_unsafe_deserialization()
         self.paths = paths
 
-        self.state_size = 243
-        self.action_size = 61
+        self.state_size = 242
+        self.action_size = 165
         self.batch_size = 128
 
         self.memory = self.load_memory()
@@ -48,7 +48,6 @@ class RLAgent:
             self.update_target_model()
 
         self.tensorboard = tf.summary.create_file_writer(paths['tensorboard_dir'])
-        self.action_counts = np.zeros(self.action_size)
         self.step = 0
 
     def _build_model(self, layer_sizes):
@@ -191,7 +190,7 @@ class RLAgent:
                         tf.summary.histogram('Model Weights/' + layer.name + '_weights', weights, step=step)
 
     def replay(self) -> None:
-        """Standard replay function used in off-policy RL"""
+        """Standard off-policy replay"""
         batch = sample(self.memory, self.batch_size)
         self._batch_train(batch)
         
@@ -202,4 +201,3 @@ class RLAgent:
     def save_model(self) -> None:
         self.model.save(self.paths['model_save_path'])
         print(f"Saved the model at {self.paths['model_save_path']}")
-        
