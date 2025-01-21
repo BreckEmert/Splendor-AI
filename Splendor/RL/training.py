@@ -9,38 +9,6 @@ from Environment.game import Game
 from RL import RLAgent, RandomAgent
 
 
-def debug_game(paths):
-    """DEPRECATED, FOR NOW"""
-    # Make logging directories
-    states_log_dir = os.path.dirname(paths['states_log_dir'])
-    states_log_dir = os.path.join(states_log_dir, "debug")
-    os.makedirs(states_log_dir, exist_ok=True)
-    
-    ddqn_model = RLAgent(paths)
-    players = [('Player1', ddqn_model), ('Player2', ddqn_model)]
-    game = Game(players)
-
-    for episode in range(10_000):
-        # Enable logging for all games
-        json_path = f"states_episode_{episode}.json"
-        state_log_path = os.path.join(states_log_dir, json_path)
-        log_state = open(state_log_path, 'w')
-
-        game.reset()
-        while not game.victor:
-            game.turn()
-
-            json.dump(game.to_state_vector(), log_state)
-            log_state.write('\n')
-        # show_game_rewards(game.players)
-
-        # if episode == 100:
-        #     print(len(game.active_player.model.memory))
-        #     write_to_csv(list(game.active_player.model.memory)[-2000:])
-        #     break
-
-        # print(f"Simulated game {episode}, game length * 2: {game.half_turns}")
-
 def ddqn_loop(paths, log_rate=0):
     """Add docstring
     """
@@ -68,10 +36,10 @@ def ddqn_loop(paths, log_rate=0):
 
             if logging:
                 json.dump(game.to_state_vector(), log_state_file)
-                need to also dump player.card_ids
+                # need to also dump player.card_ids
                 log_state_file.write('\n')
         else:
-            game.active_player.model.memory[-2][2] -= 10  # Loser reward
+            game.active_player.model.memory[-2][2] -= 1  # Loser reward
 
         game_lengths.append(game.half_turns)
 
@@ -159,45 +127,6 @@ def find_fastest_game(paths, n_games, log_states=False):
     print(f"flattened_memory has {len(flattened_memory)} length")
     game.active_player.model.write_memory(flattened_memory[1:])
 
-def show_game_rewards(players):
-    for num, player in enumerate(players):
-        print(num)
-        total_neg = total_pos = n_neg = n_pos = 0
-        for mem in player.model.memory:
-            reward = mem[2]
-            if reward < 0:
-                total_neg += reward
-                n_neg += 1
-            elif reward > 0:
-                total_pos += reward
-                n_pos += 1
-
-        print(f"\nPlayer {num} with {player.points} points:")
-
-        if total_neg:
-            average_neg = total_neg / n_neg
-            print("Negative Rewards:", total_neg, average_neg)
-        if total_pos:
-            average_pos = total_pos / n_pos
-            print("Positive Rewards:", total_pos, average_pos, "\n")
-        else:
-            print("No positive rewards")
-        
-        if player.victor:
-            winner_points = player.points
-            winner_neg = total_neg
-            winner_pos = total_pos
-        else:
-            loser_points = player.points
-            loser_neg = total_neg
-            loser_pos = total_pos
-
-        player.model.memory.clear()
-        player.model.memory.append([0, 0, 0, 0, 0])
-        
-    assert winner_points >= loser_points, f"Loser has {loser_points} points but winner only has {winner_points}"
-    assert winner_pos > loser_pos, f"Loser has {loser_pos} rewards but winner only has {winner_pos}"
-
 def write_to_csv(memory):
     print("-------Writing to CSV------")
     import pandas as pd
@@ -207,7 +136,7 @@ def write_to_csv(memory):
     states = np.array([mem[0] for mem in memory]).reshape(states.shape[0], -1)
     actions = np.array([mem[1] for mem in memory]).reshape(-1, 1)
     # rewards = np.array([mem[2] for mem in memory])
-    next_states = np.array([mem[3] for mem in memory]).reshape(next_states.shape[0], -1)
+    next_states = np.array([mem[3] for mem in memory]).reshape(next_states.shape[0], -1)  # if this breaks later try len(next_states) instead of .shape[0]?
     # dones = np.array([mem[4] for mem in memory])
 
     # Create DataFrames

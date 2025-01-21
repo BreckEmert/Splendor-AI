@@ -3,7 +3,7 @@
 import os
 from datetime import datetime, timedelta
 
-from RL import ddqn_loop, debug_game, find_fastest_game  # type: ignore
+from RL import ddqn_loop, find_fastest_game  # type: ignore
 
 
 def get_unique_filename(layer_sizes):
@@ -54,7 +54,7 @@ def get_paths(layer_sizes, model_from_name, memory_buffer_name):
 def main():
     layer_sizes = [64]
     model_from_name = None  # "64_01_14_04_51.keras"
-    memory_buffer = 'random_memory.pkl'  # 'memory.pkl' 'random_memory.pkl'
+    memory_buffer = None  # 'memory.pkl' 'random_memory.pkl'
     paths = get_paths(layer_sizes, model_from_name, memory_buffer)
     print(paths)
 

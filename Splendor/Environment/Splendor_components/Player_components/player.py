@@ -20,6 +20,7 @@ class Player:
         self.reserved_cards: list = []
 
         self.card_ids: list = [[[] for _ in range(5)] for _ in range(4)]
+        self.points: float = 0.0
         self.victor: bool = False
 
     def _initialize_all_takes(self):
@@ -41,10 +42,10 @@ class Player:
         take_2_diff = tf.reduce_sum(take_2_diff, axis=1)
         self.all_takes_2_diff = take_2_diff
 
-        self.all_takes_2_same = tf.eye(5, dtype=tf.int8)*2
+        self.all_takes_2_same = tf.eye(5, dtype=tf.int32)*2
 
         # Take 1
-        self.all_takes_1 = tf.eye(5, dtype=tf.int8)
+        self.all_takes_1 = tf.eye(5, dtype=tf.int32)
 
     def get_bought_card(self, card):
         """Handles all buying on the player's endexcept for 
@@ -54,7 +55,7 @@ class Player:
         self.points += card.points
         self.card_ids[card.tier][card.gem].append(card.id)
 
-    def _auto_spend(self, card_cost):
+    def _auto_spend_gold(self, card_cost):
         """For now, random spend logic.  Modifies player gems 
         IN PLACE.  Also ENSURE that this and other methods 
         recieve .copy() objects, as this does modify card_cost.
@@ -114,49 +115,63 @@ class Player:
         # Get the corresponding all_takes indices to the legal moves we found
         # (need a stable vector for the model)
         legal_indices = tf.where(board_mask)
+        legal_indices = tf.cast(legal_indices, tf.int32)
         legal_indices = tf.reshape(legal_indices, [-1])  # Flatten
 
         # Now we can actually update the legal_action_mask
-        action_indices = offset + legal_indices*n_discards + n_discards  # broadcast using stride=4
-        action_indices = tf.expand_dims(action_indices, axis=1)  # expand back for scattering
-        action_updates = tf.ones_like(action_indices, dtype=tf.bool)  # True where the indices are
+        action_indices = offset + legal_indices* + n_discards  # broadcast using stride=4
+        action_indices = tf.reshape(action_indices, [-1, 1])  # turns a list of indices into a list of [indices]
+        action_updates = tf.ones(tf.shape(action_indices)[0], dtype=tf.bool)  # just solid 1s for the update
+
+        """--------------DEBUGGING--------------"""
+        print("legal_action_mask shape:", tf.shape(legal_action_mask))
+        print("action_indices shape:", tf.shape(action_indices))
+        print("action_updates shape:", tf.shape(action_updates))
+        max_index = tf.reduce_max(action_indices)
+        min_index = tf.reduce_min(action_indices)
+        print("min_index:", min_index.numpy(), "max_index:", max_index.numpy())
+        """--------------DEBUGGING--------------"""
+
         legal_action_mask = tf.tensor_scatter_nd_update(legal_action_mask, action_indices, action_updates)
 
         return legal_action_mask
 
     def _get_legal_takes(self, board_gems):
         n_gems = self.gems.sum()
-        board_gems = tf.constant(board_gems[:5], dtype=tf.int8)
+        board_gems = tf.constant(board_gems[:5], dtype=tf.int32)
         legal_take_mask = tf.zeros([self.action_dim], dtype=tf.bool)
-        offset = 0  # Offsets updates to legal_take_mask, increasing as we go
+        offset = tf.constant(0, dtype=tf.int32)  # Offsets updates to legal_take_mask, increasing as we go
 
         """TAKE 3"""
         n_discards = max(0, -7+n_gems)
         # Filter self.all_takes_3 to where the board actually has gems
-        board_gt0_mask = tf.cast(board_gems > 0, tf.int8)  # Board > 0 indicator
-        takes_ltboard_mask = tf.reduce_all(self.all_takes_3 <= board_gt0_mask, axis=1)
+        board_gt0_mask = board_gems > 0  # Board > 0 indicator
+        takes_mask = tf.cast(self.all_takes_3, tf.bool)
+        takes_ltboard_mask = tf.reduce_all(takes_mask & board_gt0_mask, axis=1)
         legal_take_mask = self._scatter_legal_takes(legal_take_mask, takes_ltboard_mask, n_discards, offset)
         offset += tf.shape(takes_ltboard_mask)[0]
 
-        """TAKE 2"""
-        n_discards = max(0, n_discards-1)
         """TAKE 2 - SAME"""
+        n_discards = max(0, n_discards-1)
         # Filter self.all_takes_2_same to where the board has at least 4 gems of a color
         board_gt4_mask = tf.greater_equal(board_gems, 4)  # Board >= 4 indicator
-        takes_gtboard_mask = tf.reduce_any(self.all_takes_2 <= board_gt4_mask, axis=1)  # WANT TO TEST WETHER ANY IS NEEDED....
+        takes_mask = tf.cast(self.all_takes_2_same, tf.bool)
+        takes_gtboard_mask = tf.reduce_any(takes_mask & board_gt4_mask, axis=1)
         legal_take_mask = self._scatter_legal_takes(legal_take_mask, takes_gtboard_mask, n_discards, offset)
         offset += tf.shape(takes_gtboard_mask)[0]
 
         """TAKE 2 - DIFFERENT"""
         # Filter self.all_takes_2_diff to where the board has any gems
-        takes_ltboard_mask = tf.reduce_all(self.all_takes_2_diff <= board_gt0_mask, axis=1)
+        takes_mask = tf.cast(self.all_takes_2_diff, tf.bool)
+        takes_ltboard_mask = tf.reduce_all(takes_mask & board_gt0_mask, axis=1)
         legal_take_mask = self._scatter_legal_takes(legal_take_mask, takes_ltboard_mask, n_discards, offset)
         offset += tf.shape(takes_ltboard_mask)[0]
 
         """TAKE 1"""
         n_discards = max(0, n_discards-1)
         # Filter self.all_takes_1 to where the board has any gems
-        takes_ltboard_mask = tf.reduce_all(self.all_takes_1 <= board_gt0_mask, axis=1)
+        takes_mask = tf.cast(self.all_takes_1, tf.bool)
+        takes_ltboard_mask = tf.reduce_all(takes_mask & board_gt0_mask, axis=1)
         legal_take_mask = self._scatter_legal_takes(legal_take_mask, takes_ltboard_mask, n_discards, offset)
 
         """Complete list of legal takes"""
@@ -171,8 +186,8 @@ class Player:
         legal_buy_mask = []
 
         # Buy card
-        for tier_index, tier in enumerate(board_cards[:3]):
-            for card_index, card in enumerate(tier):
+        for tier in board_cards:
+            for card in tier:
                 if card:
                     can_afford = can_afford_with_gold = True
                     gold_needed = 0
@@ -211,45 +226,43 @@ class Player:
                 legal_buy_mask.extend([True, False])
             else:
                 legal_buy_mask.extend([False, False])
+        
+        # Pad buys if less than 3 cards are reserved
+        n_reserved = len(self.reserved_cards)
+        if n_reserved < 3:
+            legal_buy_mask.extend([False, False] * (3-n_reserved))
 
         length = len(legal_buy_mask)
         assert length == 30, f"legal_buy_mask is length {length}"
         return legal_buy_mask
 
     def _get_legal_reserves(self, board):
-        # Return object that we'll append to
-        legal_reserve_mask = []
-
+        """This almost exclusively irrelevant to search the board,
+        but while the model learns it may actually buy out all of
+        the deck, so we have to confirm there are no None.
+        """
         if len(self.reserved_cards) < 3:
-            for tier_index, tier in enumerate(board.cards[:3]):
+            legal_reserve_mask = []
+            for tier_index, tier in enumerate(board.cards):
                 for card in tier:
                     legal_reserve_mask.append(bool(card))
                 remaining_deck = board.deck_mapping[tier_index].cards
                 legal_reserve_mask.append(bool(remaining_deck))
+        else:
+            legal_reserve_mask = [False] * 15
         
         length = len(legal_reserve_mask)
-        assert length == 12, f"legal_reserve_mask is length {length}"
+        assert length == 15, f"legal_reserve_mask is length {length}"
         return legal_reserve_mask
 
     def _get_legal_moves(self, board):
-        # Take gems
         legal_take_mask = self._get_legal_takes(board.gems)
-        legal_take_mask = tf.constant(legal_take_mask, dtype=tf.bool)
-
-        # Buy card
         legal_buy_mask = self._get_legal_buys(board.cards)
-        legal_buy_mask = tf.constant(legal_buy_mask, dtype=tf.bool)
-
-        # Reserve card
         legal_reserve_mask = self._get_legal_reserves(board)
-        legal_reserve_mask = tf.constant(legal_reserve_mask, dtype=tf.bool)
         
-        legal_action_mask = tf.concat(
-            [legal_take_mask, legal_buy_mask, legal_reserve_mask], 
-            axis=0
+        return np.concatenate(
+            [legal_take_mask, legal_buy_mask, legal_reserve_mask]
         )
-        print("Length of legal moves: ", len(legal_action_mask))
-        return legal_action_mask
 
     def choose_move(self, board, state):
         legal_mask = self._get_legal_moves(board)
