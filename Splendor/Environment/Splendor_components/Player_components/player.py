@@ -1,16 +1,15 @@
 # Splendor/Environment/Splendor_components/player.py
 
-import copy
+# import copy
 import numpy as np
 import itertools as it
-import tensorflow as tf
 
 
 class Player:
     def __init__(self, name, model):
         self.name: str = name
         self.model = model
-        self.action_dim = 165
+        self.action_dim = 140
         self.reset()
         self._initialize_all_takes()
     
@@ -29,23 +28,24 @@ class Player:
         a lot of recalculation each turn.
         """
         # Take 3
-        take_3 = list(it.combinations(range(5), 3))
-        take_3 = tf.constant(take_3, dtype=tf.int32)
-        take_3 = tf.one_hot(take_3, depth=5, axis=-1, dtype=tf.int32)
-        take_3 = tf.reduce_sum(take_3, axis=1)
-        self.all_takes_3 = take_3
+        indices = list(it.combinations(range(5), 3))
+        all_takes = np.zeros((10, 5), dtype=int)
+        for index, combo in enumerate(indices):
+            all_takes[index, combo] = 1
+        self.all_takes_3 = all_takes
 
-        # Take 2
-        take_2_diff = list(it.combinations(range(5), 2))
-        take_2_diff = tf.constant(take_2_diff, dtype=tf.int32)
-        take_2_diff = tf.one_hot(take_2_diff, depth=5, axis=-1, dtype=tf.int32)
-        take_2_diff = tf.reduce_sum(take_2_diff, axis=1)
-        self.all_takes_2_diff = take_2_diff
-
-        self.all_takes_2_same = tf.eye(5, dtype=tf.int32)*2
+        # Take 2 (different)
+        indices = list(it.combinations(range(5), 2))
+        all_takes = np.zeros((10, 5), dtype=int)
+        for index, combo in enumerate(indices):
+            all_takes[index, combo] = 1
+        self.all_takes_2_diff = all_takes
+        
+        # Take 2 (same)
+        self.all_takes_2_same = np.eye(5, dtype=int)*2
 
         # Take 1
-        self.all_takes_1 = tf.eye(5, dtype=tf.int32)
+        self.all_takes_1 = np.eye(5, dtype=int)
 
     def get_bought_card(self, card):
         """Handles all buying on the player's endexcept for 
@@ -62,7 +62,7 @@ class Player:
         """
         spent_gems = np.zeros(6, dtype=np.int8)
         card_cost -= self.cards
-        card_cost = np.max(card_cost, 0)
+        card_cost = np.maximum(card_cost, 0)
         
         for index, gem_count in enumerate(card_cost):
             while gem_count > 0:
@@ -86,14 +86,14 @@ class Player:
         gross gems with all card costs!!
         """
         player_gems = self.gems[:5]
-        n_discards = max(0, 7 - self.gems.sum() - gems_to_take.sum())
+        n_discards = max(0, -7 + self.gems.sum() + gems_to_take.sum())
 
         discards = np.zeros(5, dtype=np.int8)
         while discards.sum() < n_discards:
             # Preferred discards that don't obstruct with what we took
             discard_prefs = player_gems * (1-gems_to_take)  # Or a bitwise inversion?
             discard_prefs_mask = np.where(discard_prefs > 0)[0]
-            if discard_prefs_mask.size > 0:
+            if discard_prefs_mask.size:
                 random_choice = np.random.choice(discard_prefs_mask)
                 player_gems[random_choice] -= 1
                 discards[random_choice] += 1
@@ -108,71 +108,37 @@ class Player:
 
         return discards
 
-    def _scatter_legal_takes(self, legal_action_mask, board_mask, n_discards, offset):
-        """Updates the legal action mask that will filter model 
-        actions based on what's legal to take from the board
-        """
-        # Get the corresponding all_takes indices to the legal moves we found
-        # (need a stable vector for the model)
-        legal_indices = tf.where(board_mask)
-        legal_indices = tf.cast(legal_indices, tf.int32)
-        legal_indices = tf.reshape(legal_indices, [-1])  # Flatten
-
-        # Now we can actually update the legal_action_mask
-        action_indices = offset + legal_indices* + n_discards  # broadcast using stride=4
-        action_indices = tf.reshape(action_indices, [-1, 1])  # turns a list of indices into a list of [indices]
-        action_updates = tf.ones(tf.shape(action_indices)[0], dtype=tf.bool)  # just solid 1s for the update
-
-        """--------------DEBUGGING--------------"""
-        print("legal_action_mask shape:", tf.shape(legal_action_mask))
-        print("action_indices shape:", tf.shape(action_indices))
-        print("action_updates shape:", tf.shape(action_updates))
-        max_index = tf.reduce_max(action_indices)
-        min_index = tf.reduce_min(action_indices)
-        print("min_index:", min_index.numpy(), "max_index:", max_index.numpy())
-        """--------------DEBUGGING--------------"""
-
-        legal_action_mask = tf.tensor_scatter_nd_update(legal_action_mask, action_indices, action_updates)
-
-        return legal_action_mask
-
     def _get_legal_takes(self, board_gems):
+        """For each possible take, there are ||take|| possible
+        discards.  Because these are automatically discarded
+        there is no combinatorics needed.
+        """
         n_gems = self.gems.sum()
-        board_gems = tf.constant(board_gems[:5], dtype=tf.int32)
-        legal_take_mask = tf.zeros([self.action_dim], dtype=tf.bool)
-        offset = tf.constant(0, dtype=tf.int32)  # Offsets updates to legal_take_mask, increasing as we go
+        board_gems = board_gems[:5]
+        legal_take_mask = np.zeros(95, dtype=bool)
 
         """TAKE 3"""
         n_discards = max(0, -7+n_gems)
-        # Filter self.all_takes_3 to where the board actually has gems
-        board_gt0_mask = board_gems > 0  # Board > 0 indicator
-        takes_mask = tf.cast(self.all_takes_3, tf.bool)
-        takes_ltboard_mask = tf.reduce_all(takes_mask & board_gt0_mask, axis=1)
-        legal_take_mask = self._scatter_legal_takes(legal_take_mask, takes_ltboard_mask, n_discards, offset)
-        offset += tf.shape(takes_ltboard_mask)[0]
+        for index, combo in enumerate(self.all_takes_3):
+            if np.all(board_gems >= combo):
+                legal_take_mask[4*index + n_discards] = True
 
-        """TAKE 2 - SAME"""
+        """TAKE 2 (DIFFERENT)"""
+        for index, combo in enumerate(self.all_takes_2_diff):
+            if np.all(board_gems >= combo):
+                legal_take_mask[40 + 3*index + n_discards] = True
+
+        """TAKE 2 (SAME)"""
         n_discards = max(0, n_discards-1)
-        # Filter self.all_takes_2_same to where the board has at least 4 gems of a color
-        board_gt4_mask = tf.greater_equal(board_gems, 4)  # Board >= 4 indicator
-        takes_mask = tf.cast(self.all_takes_2_same, tf.bool)
-        takes_gtboard_mask = tf.reduce_any(takes_mask & board_gt4_mask, axis=1)
-        legal_take_mask = self._scatter_legal_takes(legal_take_mask, takes_gtboard_mask, n_discards, offset)
-        offset += tf.shape(takes_gtboard_mask)[0]
-
-        """TAKE 2 - DIFFERENT"""
-        # Filter self.all_takes_2_diff to where the board has any gems
-        takes_mask = tf.cast(self.all_takes_2_diff, tf.bool)
-        takes_ltboard_mask = tf.reduce_all(takes_mask & board_gt0_mask, axis=1)
-        legal_take_mask = self._scatter_legal_takes(legal_take_mask, takes_ltboard_mask, n_discards, offset)
-        offset += tf.shape(takes_ltboard_mask)[0]
+        for gem_index in range(5):
+            if board_gems[gem_index] >= 4:
+                legal_take_mask[70 + 3*gem_index + n_discards]
 
         """TAKE 1"""
         n_discards = max(0, n_discards-1)
-        # Filter self.all_takes_1 to where the board has any gems
-        takes_mask = tf.cast(self.all_takes_1, tf.bool)
-        takes_ltboard_mask = tf.reduce_all(takes_mask & board_gt0_mask, axis=1)
-        legal_take_mask = self._scatter_legal_takes(legal_take_mask, takes_ltboard_mask, n_discards, offset)
+        for index, combo in enumerate(self.all_takes_1):
+            if np.all(board_gems >= combo):
+                legal_take_mask[85 + 2*index + n_discards] = True
 
         """Complete list of legal takes"""
         return legal_take_mask
@@ -259,6 +225,7 @@ class Player:
         legal_take_mask = self._get_legal_takes(board.gems)
         legal_buy_mask = self._get_legal_buys(board.cards)
         legal_reserve_mask = self._get_legal_reserves(board)
+        # print(len(legal_take_mask), len(legal_buy_mask), len(legal_reserve_mask))
         
         return np.concatenate(
             [legal_take_mask, legal_buy_mask, legal_reserve_mask]
@@ -267,7 +234,7 @@ class Player:
     def choose_move(self, board, state):
         legal_mask = self._get_legal_moves(board)
         rl_moves = self.model.get_predictions(state, legal_mask)
-        return np.argmax(rl_moves)  # Things like this we need to confirm tf compatibility.  I'd like to eventually use only tf
+        return np.argmax(rl_moves)
 
     def to_state_vector(self):
         reserved_cards_vector = np.zeros(33)

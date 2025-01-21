@@ -38,30 +38,34 @@ class Game:
         player, board = self.active_player, self.board
 
         # Take gems moves
-        if chosen_move_index < 120:
-            if chosen_move_index < 40: # all_takes_3*(4 discard permutations)
-                gems_to_take = player.all_takes_3[chosen_move_index]
-            elif chosen_move_index < 80: # all_takes_2_diff*4
-                gems_to_take = player.all_takes_2_diff[chosen_move_index-40]
-            elif chosen_move_index < 100: # all_takes_2_same*4
-                gems_to_take = player.all_takes_2_same[chosen_move_index-80]
-            else: # < 120, all_takes_1
-                gems_to_take = player.all_takes_1[chosen_move_index-100]
+        if chosen_move_index < 95:
+            if chosen_move_index < 40: # all_takes_3
+                # n_discards = chosen_move_index % 4
+                gems_to_take = player.all_takes_3[chosen_move_index % 4]
+            elif chosen_move_index < 70: # all_takes_2_diff
+                # n_discards = (chosen_move_index-40) % 3
+                gems_to_take = player.all_takes_2_diff[(chosen_move_index-40) % 3]
+            elif chosen_move_index < 85: # all_takes_2_same
+                # n_discards = (chosen_move_index-70) % 3
+                gems_to_take = player.all_takes_2_same[(chosen_move_index-70) % 3]
+            else: # chosen_move_index < 95, all_takes_1
+                # n_discards = (chosen_move_index-85) % 2
+                gems_to_take = player.all_takes_1[(chosen_move_index-85) % 2]
 
             net_gems = player._auto_discard(gems_to_take)
             board.take_gems(net_gems)
         # Buy card moves
-        elif chosen_move_index < 150:
-            if chosen_move_index < 144:  # Buy from a tier, 120 + 12*2
-                idx = (chosen_move_index-120) // 2
+        elif chosen_move_index < 125:
+            if chosen_move_index < 119:  # Buy from a tier, 95 + 12*2
+                idx = (chosen_move_index-95) // 2
                 bought_card = board.take_card(idx//4, idx%4)  # Tier, card idx
             else:  # Buy reserved, 3*2
-                card_index = (chosen_move_index - 144) % 3
+                card_index = (chosen_move_index - 119) % 3
                 bought_card = player.reserved_cards.pop(card_index)
             
             # Player spends the tokens
             if not chosen_move_index % 2:  # All odd indices are gold spends
-                player._auto_spend_gold(bought_card)  # Spends in-place
+                player._auto_spend_gold(bought_card.cost)  # Spends in-place
             else:
                 player.gems[:5] -= bought_card.cost
 
@@ -80,9 +84,9 @@ class Game:
                 player.victor = True
                 # reward += 1  # Should we only do -1 for the loser?
         # Reserve card moves
-        elif chosen_move_index < 165:
-            tier = (chosen_move_index - 150) // 5
-            card_index = (chosen_move_index - 150) % 5
+        else:  #  chosen_move_index < 140
+            tier = (chosen_move_index - 125) // 5
+            card_index = (chosen_move_index - 125) % 5
 
             if card_index < 4:  # Reserve from regular tier
                 reserved_card, gold = board.reserve(tier, card_index)  # DO WE NEED RESERVE FOR GOLD REWARD AND RESERVE FOR NOT?
