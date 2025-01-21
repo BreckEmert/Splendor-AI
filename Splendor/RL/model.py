@@ -25,7 +25,7 @@ class RLAgent:
         self.paths = paths
 
         self.state_size = 242
-        self.action_size = 165
+        self.action_size = 140
         self.batch_size = 128
 
         self.memory = self.load_memory()

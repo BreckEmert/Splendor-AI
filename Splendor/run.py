@@ -59,7 +59,7 @@ def main():
     print(paths)
 
     # Function calls
-    ddqn_loop(paths, log_rate=10)
+    ddqn_loop(paths, log_rate=0)
         #! Comment line 205 in player.py!
     # debug_game(paths, memory_buffer=None)
     # find_fastest_game(paths, n_games=2, log_states=False)
