@@ -30,7 +30,7 @@ class Board:
 
         self.nobles = [self.nobles.draw() for _ in range(3)]
                 
-    def take_gems(self, taken_gems):
+    def take_gems(self, taken_gems): 
         self.gems -= np.pad(taken_gems, (0, 6-len(taken_gems)))
         assert np.all(self.gems >= 0), f"Illegal board gems {self.gems}, {taken_gems}"
 
@@ -46,10 +46,10 @@ class Board:
     
     def reserve(self, tier, position):
         # Give gold if available
-        gold = 0
+        gold = np.zeros(6, dtype=int)
         if self.gems[5]:
             self.gems[5] -= 1
-            gold = 1
+            gold[5] = 1
 
         # Replace card
         card = self.take_card(tier, position)
@@ -57,10 +57,10 @@ class Board:
     
     def reserve_from_deck(self, tier):
         # Give gold if available
-        gold = 0
+        gold = np.zeros(6, dtype=int)
         if self.gems[5]:
             self.gems[5] -= 1
-            gold = 1
+            gold[5] = 1
 
         # Remove card
         return self.deck_mapping[tier].draw(), gold

@@ -13,9 +13,9 @@ def ddqn_loop(paths, log_rate=0):
     """Add docstring
     """
     # Initialize players, their models, and a game (these get reset)
-    ddqn_model = RLAgent(paths)
-    players = [('Player1', ddqn_model), ('Player2', ddqn_model)]
-    game = Game(players)
+    model = RLAgent(paths)
+    players = [('Player1', model), ('Player2', model)]
+    game = Game(players, model)
     game_lengths = []
 
     # Loop through games - can be stopped at any time
@@ -38,20 +38,18 @@ def ddqn_loop(paths, log_rate=0):
                 json.dump(game.to_state_vector(), log_state_file)
                 # need to also dump player.card_ids
                 log_state_file.write('\n')
-        else:
-            game.active_player.model.memory[-2][2] -= 1  # Loser reward
 
         game_lengths.append(game.half_turns)
 
         # Run replay after each game
-        ddqn_model.replay()
+        model.replay()
 
         # Save every 10 episodes
         if episode % 10 == 0:
-            ddqn_model.update_target_model()
+            model.update_target_model()
             if episode % 100 == 0:
-                ddqn_model.save_model()
-                ddqn_model.write_memory()
+                model.save_model()
+                model.write_memory()
 
             avg = sum(game_lengths)/len(game_lengths)/2
             print(f"Episode: {episode}")
@@ -59,7 +57,7 @@ def ddqn_loop(paths, log_rate=0):
             game_lengths = []
     
     # Save memory
-    ddqn_model.write_memory()
+    model.write_memory()
 
 def find_fastest_game(paths, n_games, log_states=False):
     """"Simulates tons of games, putting only ones below a move length 
@@ -125,7 +123,7 @@ def find_fastest_game(paths, n_games, log_states=False):
     # Write out the memories of the winner of all the short games
     flattened_memory = [state for game in completed_games for state in game]
     print(f"flattened_memory has {len(flattened_memory)} length")
-    game.active_player.model.write_memory(flattened_memory[1:])
+    # game.active_player.model.write_memory(flattened_memory[1:])  # Doesn't work?  memories are split between players, no?
 
 def write_to_csv(memory):
     print("-------Writing to CSV------")
