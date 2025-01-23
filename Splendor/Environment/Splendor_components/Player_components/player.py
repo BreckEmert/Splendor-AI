@@ -9,9 +9,9 @@ class Player:
     def __init__(self, name, model):
         self.name: str = name
         self.model = model
-        self.action_dim = 140
         self.reset()
         self._initialize_all_takes()
+        self._initialize_dimensions()
     
     def reset(self):
         self.gems: np.ndarray = np.zeros(6, dtype=int)  # Gold gem so 6
@@ -47,6 +47,32 @@ class Player:
         # Take 1
         self.all_takes_1 = np.eye(5, dtype=int)
 
+    def _initialize_dimensions(self):
+        """Get indices used in other parts of the code 
+        to avoid some hardcoding.
+        """
+        self.take_dim = (
+            len(self.all_takes_3) * 4 +       # 10 * 4
+            len(self.all_takes_2_same) * 3 +  # 5 * 3
+            len(self.all_takes_2_diff) * 3 +  # 10 * 3
+            len(self.all_takes_1) * 2         # 5 * 2
+        )
+
+        self.buy_dim = (
+            3 *  # 3 tiers
+            4 *  # 4 cards per tier
+            2 +  # Buy with and without gold
+            3 *  # 3 reserve slots
+            2    # Buy with and without gold
+        )
+
+        self.reserve_dim = (
+            3 *  # 3 tiers
+            5    # 4 cards per tier + top of deck
+        )
+
+        self.action_dim = self.take_dim + self.buy_dim + self.reserve_dim
+
     def get_bought_card(self, card):
         """Handles all buying on the player's endexcept for 
         the gems, which is handled by _auto_discard.
@@ -55,84 +81,99 @@ class Player:
         self.points += card.points
         self.card_ids[card.tier][card.gem].append(card.id)
 
-    def _auto_spend_gold(self, card_cost):
+    def _auto_spend(self, raw_cost, with_gold):
+        assert np.all(self.gems >= 0), "self.gems is bad before _auto_spend_gold"
         """For now, random spend logic.  Modifies player gems 
         IN PLACE.  Also ENSURE that this and other methods 
         recieve .copy() objects, as this does modify card_cost.
         """
-        spent_gems = np.zeros(6, dtype=np.int8)
-        card_cost -= self.cards
-        card_cost = np.maximum(card_cost, 0)
-        
-        for index, gem_count in enumerate(card_cost):
-            while gem_count > 0:
-                # If we have a gem of that color, spend it
-                if self.gems[index] > 0:
-                    self.gems[index] -= 1
-                    spent_gems[index] += 1
-                    card_cost[index] -= 1
-                    continue
-                
-                # Otherwise pay with gold
-                self.gems[5] -= 1
-                spent_gems[5] += 1
-                gem_count -= 1
+        spent_gems = np.zeros(6, dtype=int)
 
+        # Discount the cost with our purchased cards
+        card_cost = np.maximum(raw_cost - self.cards, 0)
+
+        # IMPLEMENT A HOG MOVE?  Often we don't want to relenquish colors.
+        # Pay with regular gems
+        spent_gems[:5] = np.minimum(self.gems[:5], card_cost)
+        card_cost -= spent_gems[:5]
+
+        # Pay the rest with gold
+        if with_gold:
+            spent_gems[5] = card_cost.sum()
+        assert spent_gems[5] <= self.gems[5], "spent more gold than owned"
+
+        # Subtract the spent gems
+        self.gems -= spent_gems
+        assert np.all(self.gems >= 0), "self.gems is bad after _auto_spend_gold"
         return spent_gems
 
-    def _auto_discard(self, gems_to_take):
-        """For now, random discard logic.  Modifies self.gems
-        IN PLACE.  Good logic could be cosine similarity of 
-        gross gems with all card costs!!
+    def auto_take(self, gems_to_take):
+        assert self.gems.sum() <= 10, f"player.gems gt 10 before auto_take: {self.gems}"
         """
-        player_gems = self.gems[:5]
-        n_discards = max(0, -7 + self.gems.sum() + gems_to_take.sum())
+        Add gems_to_take to self.gems[:5], and if total exceeds 10,
+        discard enough gems to get back to 10 or fewer. 
+        Returns (net_gems, discards).
+        """
+        # Add gems to self.gems and handle reserve gold reward
+        self.gems[:5] += gems_to_take[:5]  # Always add gems
+        if len(gems_to_take) == 6:         # Add gold if it's there
+            self.gems[5] += gems_to_take[5]
+            gems_to_take = gems_to_take[:5]
+        self_gems = self.gems[:5]
+        
+        # Now discard if required
+        n_discards = max(0, self.gems.sum() - 10)
+        discards = np.zeros(5, dtype=int)
 
-        discards = np.zeros(5, dtype=np.int8)
         while discards.sum() < n_discards:
-            # Preferred discards that don't obstruct with what we took
-            discard_prefs = player_gems * (1-gems_to_take)  # Or a bitwise inversion?
-            discard_prefs_mask = np.where(discard_prefs > 0)[0]
-            if discard_prefs_mask.size:
-                random_choice = np.random.choice(discard_prefs_mask)
-                player_gems[random_choice] -= 1
-                discards[random_choice] += 1
-                continue
-            
-            # Otherwise discard gems we took
-            discard_mask = np.where(player_gems > 0)[0]
-            random_choice = np.random.choice(discard_mask)
+            # Try to prefer discarding gems we didn't take
+            discard_prefs = np.where((self_gems > 0) & (gems_to_take == 0))[0]
+            if discard_prefs.size > 0:
+                color = np.random.choice(discard_prefs)
+            else:
+                discardable = np.where(self_gems > 0)[0]
+                color = np.random.choice(discardable)
 
-            player_gems[random_choice] -= 1
-            discards[random_choice] += 1
+            # Discard 1 gem from that color
+            self_gems[color] -= 1
+            discards[color] += 1
 
-        return discards
+        assert self.gems.sum() <= 10, f"player.gems gt 10 after auto_take: {self.gems}"
+        net_take = gems_to_take - discards
+
+        # Add back on the gold if 
+        if len(gems_to_take) == 6:
+            net_take = np.append(net_take, [1])
+        return net_take  # Only return gems actually taken
 
     def _get_legal_takes(self, board_gems):
         """For each possible take, there are ||take|| possible
         discards.  Because these are automatically discarded
         there is no combinatorics needed.
         """
-        n_gems = self.gems.sum()
         board_gems = board_gems[:5]
         legal_take_mask = np.zeros(95, dtype=bool)
 
         """TAKE 3"""
-        n_discards = max(0, -7+n_gems)
+        n_discards = max(0, -7+self.gems.sum())
         for index, combo in enumerate(self.all_takes_3):
             if np.all(board_gems >= combo):
                 legal_take_mask[4*index + n_discards] = True
-
-        """TAKE 2 (DIFFERENT)"""
-        for index, combo in enumerate(self.all_takes_2_diff):
-            if np.all(board_gems >= combo):
-                legal_take_mask[40 + 3*index + n_discards] = True
 
         """TAKE 2 (SAME)"""
         n_discards = max(0, n_discards-1)
         for gem_index in range(5):
             if board_gems[gem_index] >= 4:
-                legal_take_mask[70 + 3*gem_index + n_discards]
+                legal_take_mask[40 + 3*gem_index + n_discards] = True
+
+        # The rest of the moves are suboptimal, return early if possible
+        if legal_take_mask.sum():
+            return legal_take_mask
+
+        """TAKE 2 (DIFFERENT)"""
+        for index, combo in enumerate(self.all_takes_2_diff):
+            if np.all(board_gems >= combo):
+                legal_take_mask[55 + 3*index + n_discards] = True
 
         """TAKE 1"""
         n_discards = max(0, n_discards-1)
@@ -152,9 +193,10 @@ class Player:
         legal_buy_mask = []
 
         # Buy card
-        for tier in board_cards:
-            for card in tier:
-                if card:
+        for tier_index in range(3):
+            for card_index in range(4):
+                if card_index < len(board_cards[tier_index]):
+                    card = board_cards[tier_index][card_index]
                     can_afford = can_afford_with_gold = True
                     gold_needed = 0
 
@@ -165,38 +207,31 @@ class Player:
                             if gold_needed > effective_gems[5]:
                                 can_afford_with_gold = False
                                 break
-
-                    if can_afford_with_gold:
-                        legal_buy_mask.extend([True, True])
-                    elif can_afford:
-                        legal_buy_mask.extend([True, False])
-                    else:
-                        legal_buy_mask.extend([False, False])
+                    
+                    # Append results to the mask
+                    legal_buy_mask.extend([can_afford, can_afford_with_gold])
+                else:
+                    legal_buy_mask.extend([False, False])
 
         # Buy a reserved card
-        for card_index, card in enumerate(self.reserved_cards):
-            can_afford = can_afford_with_gold = True
-            gold_needed = 0
+        for reserve_index in range(3):
+            if reserve_index < len(self.reserved_cards):
+                card = self.reserved_cards[reserve_index]
+                can_afford = can_afford_with_gold = True
+                gold_needed = 0
 
-            for gem_index, amount in enumerate(card.cost):
-                if effective_gems[gem_index] < amount:
-                    can_afford = False
-                    gold_needed += amount - effective_gems[gem_index]
-                    if gold_needed > effective_gems[5]:
-                        can_afford_with_gold = False
-                        break
-
-            if can_afford_with_gold:
-                legal_buy_mask.extend([True, True])
-            elif can_afford:
-                legal_buy_mask.extend([True, False])
+                for gem_index, amount in enumerate(card.cost):
+                    if effective_gems[gem_index] < amount:
+                        can_afford = False
+                        gold_needed += amount - effective_gems[gem_index]
+                        if gold_needed > effective_gems[5]:
+                            can_afford_with_gold = False
+                            break
+                
+                # Append results to the mask
+                legal_buy_mask.extend([can_afford, can_afford_with_gold])
             else:
                 legal_buy_mask.extend([False, False])
-        
-        # Pad buys if less than 3 cards are reserved
-        n_reserved = len(self.reserved_cards)
-        if n_reserved < 3:
-            legal_buy_mask.extend([False, False] * (3-n_reserved))
 
         length = len(legal_buy_mask)
         assert length == 30, f"legal_buy_mask is length {length}"
@@ -221,19 +256,29 @@ class Player:
         assert length == 15, f"legal_reserve_mask is length {length}"
         return legal_reserve_mask
 
-    def _get_legal_moves(self, board):
+    def get_legal_moves(self, board):
         legal_take_mask = self._get_legal_takes(board.gems)
         legal_buy_mask = self._get_legal_buys(board.cards)
         legal_reserve_mask = self._get_legal_reserves(board)
         # print(len(legal_take_mask), len(legal_buy_mask), len(legal_reserve_mask))
         
+        self.temporary_legal = np.concatenate(
+            [legal_take_mask, legal_buy_mask, legal_reserve_mask]
+        )
+        # for index, value in enumerate(self.temporary_legal):
+        #     print(index, value)
+        # print("legal masks lengths: ", len(legal_take_mask), len(legal_buy_mask), len(legal_reserve_mask))
+        # assert len(self.temporary_legal) == self.action_dim, f"Action dim mismatch {len(self.temporary_legal)}"
+        assert self.temporary_legal.sum(), f"no legal moves found"
         return np.concatenate(
             [legal_take_mask, legal_buy_mask, legal_reserve_mask]
         )
 
     def choose_move(self, board, state):
-        legal_mask = self._get_legal_moves(board)
+        legal_mask = self.get_legal_moves(board)
         rl_moves = self.model.get_predictions(state, legal_mask)
+        # for l, r in zip(legal_mask, rl_moves):
+        #     print(l, r)
         return np.argmax(rl_moves)
 
     def to_state_vector(self):

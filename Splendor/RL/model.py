@@ -24,9 +24,9 @@ class RLAgent:
         enable_unsafe_deserialization()
         self.paths = paths
 
-        self.state_size = 242
-        self.action_size = 140
-        self.batch_size = 128
+        self.state_dim = 242
+        self.action_dim = 140
+        self.batch_size = 64
 
         self.memory = self.load_memory()
 
@@ -51,7 +51,7 @@ class RLAgent:
         self.step = 0
 
     def _build_model(self, layer_sizes):
-        state_input = Input(shape=(self.state_size, ))
+        state_input = Input(shape=(self.state_dim, ))
 
         dense1 = Dense(layer_sizes[0], kernel_initializer=HeNormal(), 
                        name='Dense1')(state_input)  # Can do # l2(0.001)
@@ -62,7 +62,7 @@ class RLAgent:
         # dense2 = LeakyReLU(alpha=0.3)(dense2)
         # dense2 = BatchNormalization(name='Dense2')(dense2)
 
-        action = Dense(self.action_size, activation='linear', 
+        action = Dense(self.action_dim, activation='linear', 
                        kernel_initializer=HeNormal(), kernel_regularizer=l2(0.015), 
                        name='action')(dense1)
 
@@ -80,9 +80,9 @@ class RLAgent:
         else:
             # Should be run with preexisting memory from 
             # training.find_fastest_game because this memory is bad
-            dummy_state = np.zeros(self.state_size, dtype=np.float32)
-            dummy_mask = np.ones(self.action_size, dtype=bool)
-            loaded_memory = [[dummy_state, 1, 1, dummy_state, 1, dummy_mask]]
+            dummy_state = np.zeros(self.state_dim, dtype=np.float32)
+            dummy_mask = np.ones(self.action_dim, dtype=bool)
+            loaded_memory = [[dummy_state, 1, 1, dummy_state, dummy_mask, 1]]
 
         return deque(loaded_memory, maxlen=50_000)
     
@@ -110,15 +110,14 @@ class RLAgent:
     @tf.function
     def get_predictions(self, state, legal_mask):
         if tf.random.uniform(()) <= self.epsilon:
-            qs = tf.random.uniform([self.action_size])
+            qs = tf.random.uniform([self.action_dim])
         else:
-            state = tf.reshape(state, [1, self.state_size])
+            state = tf.reshape(state, [1, self.state_dim])
             qs = self.model(state, training=False)[0]
         
         return tf.where(legal_mask, qs, tf.fill(qs.shape, -tf.float32.max))
 
-    def remember(self, memory, legal_mask) -> None:
-        self.memory[-1].append(legal_mask.copy())  # Avoids recalculation, but overall I regret this method
+    def remember(self, memory) -> None:
         self.memory.append(deepcopy(memory))
 
     @tf.function
@@ -127,8 +126,8 @@ class RLAgent:
         actions = tf.convert_to_tensor([mem[1] for mem in batch], dtype=tf.int32)
         rewards = tf.convert_to_tensor([mem[2] for mem in batch], dtype=tf.float32)
         next_states = tf.convert_to_tensor([mem[3] for mem in batch], dtype=tf.float32)
-        dones = tf.convert_to_tensor([mem[4] for mem in batch], dtype=tf.float32)
-        legal_masks = tf.convert_to_tensor([mem[5] for mem in batch], dtype=tf.bool)
+        legal_masks = tf.convert_to_tensor([mem[4] for mem in batch], dtype=tf.bool)
+        dones = tf.convert_to_tensor([mem[5] for mem in batch], dtype=tf.float32)
 
         # Calculate this turn's qs with primary model
         qs = self.model(states, training=False)
@@ -143,7 +142,7 @@ class RLAgent:
         selected_next_qs = tf.gather_nd(next_qs, tf.stack([tf.range(len(next_actions)), next_actions], axis=1))
 
         # Ground qs with reward and value trajectory
-        targets = rewards + dones * self.gamma * selected_next_qs
+        targets = rewards + (1.0-dones) * self.gamma * selected_next_qs
         actions_indices = tf.stack([tf.range(len(actions)), actions], axis=1)
         target_qs = tf.tensor_scatter_nd_update(qs, actions_indices, targets)
 
