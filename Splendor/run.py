@@ -59,6 +59,7 @@ def main():
     print(paths)
 
     # Function calls
+    # TO DO - MAKE VERSION WITHOUT SEPARATE DISCARD INDICES
     ddqn_loop(paths, log_rate=0)
         #! Comment line 205 in player.py!
     # debug_game(paths, memory_buffer=None)
