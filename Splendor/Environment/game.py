@@ -2,8 +2,8 @@
 
 import numpy as np
 
-from Environment.Splendor_components.Board_components.board import Board  # type: ignore
-from Environment.Splendor_components.Player_components.player import Player  # type: ignore
+from Environment.Splendor_components.Board_components.board import Board
+from Environment.Splendor_components.Player_components.player import Player
 
 
 class Game:
@@ -59,9 +59,7 @@ class Game:
             else: # chosen_move_index < 95  # all_takes_1; 5 * 2discards
                 gems_to_take = player.all_takes_1[(chosen_move_index-85) // 2]
 
-            tmp = player.gems.copy()
             taken_gems = player.auto_take(gems_to_take)
-            tmp_spent = player.gems - tmp
             board.take_gems(taken_gems)
 
             return 0  # No reward
@@ -88,19 +86,23 @@ class Game:
 
             """Noble visit and end-of-game"""
             reward = bought_card.points
-            if self.check_noble_visit(player):
-                reward += 3
+            reward += 3 * self._check_noble_visit(player)
+            # Capping any points past 15
+            original_points = player.points + bought_card.points  # player already got points so need to take them back
+            # Normalizing by 3, so avg reward is around 1 when buying
+            reward = min(reward, 15 - original_points) / 3
+
             if player.points >= 15:
                 self.victor = True
                 player.victor = True
-                # reward += 1  # Should we only do -1 for the loser?
-                self.model.memory[-2][2] -= 1  # Loser reward
+                reward += 5
+                self.model.memory[-1][2] -= 5  # Loser reward
             
             return reward
         
         # Reserve card moves
         chosen_move_index -= player.buy_dim
-        if chosen_move_index < player.buy_dim:
+        if chosen_move_index < player.reserve_dim:
             tier = chosen_move_index // 5  # 4 cards + top of deck
             card_index = chosen_move_index % 5
 
@@ -117,21 +119,21 @@ class Game:
 
             return 0
 
-    def check_noble_visit(self, player):
-        visited = False
+    def _check_noble_visit(self, player):
+        visited = 0
         for index, noble in enumerate(self.board.nobles):
             if noble and np.all(player.cards >= noble.cost):
                 self.board.nobles[index] = None
                 player.points += 3
-                visited = True  # No logic to tie-break, seems too insignificant for training
+                visited += 1
         return visited
     
     def to_state_vector(self):
-        board_vector = self.board.to_state_vector()  # length 150
+        board_vector = self.board.to_state_vector()  # length 156
         active_player = self.active_player.to_state_vector()  # length 46
         enemy_player = self.players[(self.half_turns+1) % 2].to_state_vector()  # length 46
 
         vector = np.concatenate((board_vector, active_player, enemy_player))
-        assert len(vector) == 242, f"Game vector is length {len(vector)}"
+        # assert len(vector) == 248, f"Game vector is length {len(vector)}"
         return vector.astype(np.float32)
     
