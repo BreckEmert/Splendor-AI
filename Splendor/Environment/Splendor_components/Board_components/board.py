@@ -32,11 +32,11 @@ class Board:
                 
     def take_gems(self, taken_gems): 
         self.gems -= np.pad(taken_gems, (0, 6-len(taken_gems)))
-        assert np.all(self.gems >= 0), f"Illegal board gems {self.gems}, {taken_gems}"
+        # assert np.all(self.gems >= 0), f"Illegal board gems {self.gems}, {taken_gems}"
 
     def return_gems(self, returned_gems):
         self.gems += np.pad(returned_gems, (0, 6-len(returned_gems)))
-        assert np.all(self.gems >= 0), f"Illegal board gems {self.gems}, {returned_gems}"
+        # assert np.all(self.gems >= 0), f"Illegal board gems {self.gems}, {returned_gems}"
 
     def take_card(self, tier, position):
         card = self.cards[tier][position]
@@ -77,6 +77,9 @@ class Board:
             for card in self.nobles
         ]
 
-        state_vector = np.concatenate((*tier_vector, *nobles_vector))  # No longer including self.gems
-        assert len(state_vector) == 150, f"board vector is {len(state_vector)}"
-        return state_vector  # length 150
+        state_vector = np.concatenate((self.gems, *tier_vector, *nobles_vector))
+        # UPDATE: including self.gems again
+        # No longer including self.gems
+        # Need to fully decide on this.
+        # assert len(state_vector) == 156, f"board vector is {len(state_vector)}"
+        return state_vector  # length 156

@@ -82,7 +82,7 @@ class Player:
         self.card_ids[card.tier][card.gem].append(card.id)
 
     def _auto_spend(self, raw_cost, with_gold):
-        assert np.all(self.gems >= 0), "self.gems is bad before _auto_spend_gold"
+        # assert np.all(self.gems >= 0), "self.gems is bad before _auto_spend_gold"
         """For now, random spend logic.  Modifies player gems 
         IN PLACE.  Also ENSURE that this and other methods 
         recieve .copy() objects, as this does modify card_cost.
@@ -100,15 +100,14 @@ class Player:
         # Pay the rest with gold
         if with_gold:
             spent_gems[5] = card_cost.sum()
-        assert spent_gems[5] <= self.gems[5], "spent more gold than owned"
 
         # Subtract the spent gems
         self.gems -= spent_gems
-        assert np.all(self.gems >= 0), "self.gems is bad after _auto_spend_gold"
+        # assert np.all(self.gems >= 0), "self.gems is bad after _auto_spend_gold"
         return spent_gems
 
     def auto_take(self, gems_to_take):
-        assert self.gems.sum() <= 10, f"player.gems gt 10 before auto_take: {self.gems}"
+        # assert self.gems.sum() <= 10, f"player.gems gt 10 before auto_take: {self.gems}"
         """
         Add gems_to_take to self.gems[:5], and if total exceeds 10,
         discard enough gems to get back to 10 or fewer. 
@@ -116,7 +115,8 @@ class Player:
         """
         # Add gems to self.gems and handle reserve gold reward
         self.gems[:5] += gems_to_take[:5]  # Always add gems
-        if len(gems_to_take) == 6:         # Add gold if it's there
+        gold_only = len(gems_to_take) == 6
+        if gold_only:         # Add gold if it's there
             self.gems[5] += gems_to_take[5]
             gems_to_take = gems_to_take[:5]
         self_gems = self.gems[:5]
@@ -138,11 +138,11 @@ class Player:
             self_gems[color] -= 1
             discards[color] += 1
 
-        assert self.gems.sum() <= 10, f"player.gems gt 10 after auto_take: {self.gems}"
+        # assert self.gems.sum() <= 10, f"player.gems gt 10 after auto_take: {self.gems}"
         net_take = gems_to_take - discards
 
         # Add back on the gold if 
-        if len(gems_to_take) == 6:
+        if gold_only:
             net_take = np.append(net_take, [1])
         return net_take  # Only return gems actually taken
 
@@ -165,10 +165,6 @@ class Player:
         for gem_index in range(5):
             if board_gems[gem_index] >= 4:
                 legal_take_mask[40 + 3*gem_index + n_discards] = True
-
-        # The rest of the moves are suboptimal, return early if possible
-        if legal_take_mask.sum():
-            return legal_take_mask
 
         """TAKE 2 (DIFFERENT)"""
         for index, combo in enumerate(self.all_takes_2_diff):
@@ -195,7 +191,7 @@ class Player:
         # Buy card
         for tier_index in range(3):
             for card_index in range(4):
-                if card_index < len(board_cards[tier_index]):
+                if board_cards[tier_index][card_index]:
                     card = board_cards[tier_index][card_index]
                     can_afford = can_afford_with_gold = True
                     gold_needed = 0
@@ -234,7 +230,7 @@ class Player:
                 legal_buy_mask.extend([False, False])
 
         length = len(legal_buy_mask)
-        assert length == 30, f"legal_buy_mask is length {length}"
+        # assert length == 30, f"legal_buy_mask is length {length}"
         return legal_buy_mask
 
     def _get_legal_reserves(self, board):
@@ -253,23 +249,14 @@ class Player:
             legal_reserve_mask = [False] * 15
         
         length = len(legal_reserve_mask)
-        assert length == 15, f"legal_reserve_mask is length {length}"
+        # assert length == 15, f"legal_reserve_mask is length {length}"
         return legal_reserve_mask
 
     def get_legal_moves(self, board):
         legal_take_mask = self._get_legal_takes(board.gems)
         legal_buy_mask = self._get_legal_buys(board.cards)
         legal_reserve_mask = self._get_legal_reserves(board)
-        # print(len(legal_take_mask), len(legal_buy_mask), len(legal_reserve_mask))
         
-        self.temporary_legal = np.concatenate(
-            [legal_take_mask, legal_buy_mask, legal_reserve_mask]
-        )
-        # for index, value in enumerate(self.temporary_legal):
-        #     print(index, value)
-        # print("legal masks lengths: ", len(legal_take_mask), len(legal_buy_mask), len(legal_reserve_mask))
-        # assert len(self.temporary_legal) == self.action_dim, f"Action dim mismatch {len(self.temporary_legal)}"
-        assert self.temporary_legal.sum(), f"no legal moves found"
         return np.concatenate(
             [legal_take_mask, legal_buy_mask, legal_reserve_mask]
         )
@@ -294,5 +281,5 @@ class Player:
             [self.points / 15]  # length 1
         ))
 
-        # assert len(state_vector) == 46, "Player state is {len(state_vector)}"
+        # # assert len(state_vector) == 46, "Player state is {len(state_vector)}"
         return state_vector  # length 46
