@@ -33,8 +33,6 @@ class Game:
         # Apply primary move
         move_index = self.active_player.choose_move(self.board, state)
         reward = self.apply_move(move_index)
-        # print("Active player points: ", self.active_player.points)
-        # DONT FORGET TO DO self.victor IN self.apply_move
 
         # Remember
         next_state = self.to_state_vector()
@@ -47,7 +45,6 @@ class Game:
         self.half_turns += 1
 
     def apply_move(self, chosen_move_index):
-        print("Original index: ", chosen_move_index)
         reward = 0
         player, board = self.active_player, self.board
 
@@ -61,12 +58,10 @@ class Game:
                 gems_to_take = player.all_takes_2_diff[(chosen_move_index-55) // 3]
             else: # chosen_move_index < 95  # all_takes_1; 5 * 2discards
                 gems_to_take = player.all_takes_1[(chosen_move_index-85) // 2]
-            print("Taking", gems_to_take)
 
             tmp = player.gems.copy()
-            taken_gems = player._auto_take(gems_to_take)
+            taken_gems = player.auto_take(gems_to_take)
             tmp_spent = player.gems - tmp
-            print("view of spend from game.py: ", tmp_spent)
             board.take_gems(taken_gems)
 
             return 0  # No reward
@@ -74,7 +69,6 @@ class Game:
         # Buy card moves
         chosen_move_index -= player.take_dim
         if chosen_move_index < player.buy_dim:
-            print("Buying", chosen_move_index)
             if chosen_move_index < 24:  # 12 cards * w&w/o gold
                 idx = chosen_move_index // 2
                 bought_card = board.take_card(idx//4, idx%4)  # Tier, card idx
@@ -107,7 +101,6 @@ class Game:
         # Reserve card moves
         chosen_move_index -= player.buy_dim
         if chosen_move_index < player.buy_dim:
-            print("Reserving", chosen_move_index)
             tier = chosen_move_index // 5  # 4 cards + top of deck
             card_index = chosen_move_index % 5
 
@@ -119,8 +112,8 @@ class Game:
                 reserved_card, gold = board.reserve_from_deck(tier)
 
             player.reserved_cards.append(reserved_card)
-            discard_if_gt10 = player._auto_take(gold)
-            board.return_gems(discard_if_gt10)
+            discard_if_gt10 = player.auto_take(gold)
+            board.take_gems(discard_if_gt10)
 
             return 0
 
