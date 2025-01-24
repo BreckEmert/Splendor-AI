@@ -19,25 +19,25 @@ def ddqn_loop(paths, log_rate=0):
     game_lengths = []
 
     # Loop through games - can be stopped at any time
-    for episode in range(750):  # Crashing after 750 now?
+    for episode in range(5000):  # Crashing after 750 now?
         game.reset()
 
         # Enable logging
-        if log_rate and episode%log_rate == 0:
-            log_path = os.path.join(paths['states_log_dir'], f"states_episode_{episode}.json")
-            log_state_file = open(log_path, 'w')
-            logging = True
-        else:
-            logging = False
+        # if log_rate and episode%log_rate == 0:
+        #     log_path = os.path.join(paths['states_log_dir'], f"states_episode_{episode}.json")
+        #     log_state_file = open(log_path, 'w')
+        #     logging = True
+        # else:
+        #     logging = False
 
         # Play a game
         while not game.victor:
             game.turn()
 
-            if logging:
-                json.dump(game.to_state_vector(), log_state_file)
-                # need to also dump player.card_ids
-                log_state_file.write('\n')
+            # if logging:
+            #     json.dump(game.to_state_vector(), log_state_file)
+            #     # need to also dump player.card_ids
+            #     log_state_file.write('\n')
 
         game_lengths.append(game.half_turns)
 
@@ -47,14 +47,16 @@ def ddqn_loop(paths, log_rate=0):
         # Save every 10 episodes
         if episode % 10 == 0:
             model.update_target_model()
-            if episode % 100 == 0:
-                model.save_model()
-                model.write_memory()
 
-            avg = sum(game_lengths)/len(game_lengths)/2
-            print(f"Episode: {episode}")
-            print(f"Average turns for last 10 games: {avg}")
-            game_lengths = []
+            if episode % 100 == 0:
+                avg = sum(game_lengths)/len(game_lengths)/2
+                print(f"Episode: {episode}")
+                print(f"Average turns for last 100 games: {avg}")
+                game_lengths = []
+
+                if episode % 500 == 0:
+                    model.save_model()
+                    model.write_memory()
     
     # Save memory
     model.write_memory()
