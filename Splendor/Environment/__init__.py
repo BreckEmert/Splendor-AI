@@ -2,5 +2,5 @@
 
 from .Splendor_components import (
     Board, Player,
-    BestStrategy, RandomStrategy, OffensiveStrategy, ResourceHog, ObliviousStrategy
+    # BestStrategy, RandomStrategy, OffensiveStrategy, ResourceHog, ObliviousStrategy
 )

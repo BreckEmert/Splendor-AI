@@ -24,17 +24,17 @@ class RLAgent:
         enable_unsafe_deserialization()
         self.paths = paths
 
-        self.state_size = 243
-        self.action_size = 61
-        self.batch_size = 128
+        self.state_dim = 248
+        self.action_dim = 140
+        self.batch_size = 64
 
         self.memory = self.load_memory()
 
-        self.gamma = 0.9  # 0.1**(1/25)
+        self.gamma = 0.99  # 0.1**(1/25)
         self.epsilon = 1.0
         self.epsilon_min = 0.04
-        self.epsilon_decay = 0.995
-        self.lr = 0.01
+        self.epsilon_decay = 0.998
+        self.lr = 0.001
 
         model_from_path = paths['model_from_path']
         if model_from_path:
@@ -44,31 +44,50 @@ class RLAgent:
         else:
             print("Building a new model")
             self.model = self._build_model(paths['layer_sizes'])
+            self.model._name = "policy_model"
             self.target_model = self._build_model(paths['layer_sizes'])
+            self.target_model._name = "target_model"
             self.update_target_model()
 
         self.tensorboard = tf.summary.create_file_writer(paths['tensorboard_dir'])
-        self.action_counts = np.zeros(self.action_size)
+        self._get_action_indices()
         self.step = 0
 
+    def _get_action_indices(self):
+        self.i_take_3 = tf.range(0, 40, 4)
+        self.i_take_2 = tf.range(40, 55, 3)
+        combined = tf.concat([self.i_take_3, self.i_take_2], axis=0)
+        self.i_other_takes = tf.sets.difference(
+            tf.constant([range(70)]),
+            tf.expand_dims(combined, axis=0)
+        ).values
+
+        self.i_buy_tier1 = tf.range(95, 103)
+        self.i_buy_tier2 = tf.range(103, 111)
+        self.i_buy_tier3 = tf.range(111, 119)
+        self.i_buy_reserved = tf.range(119, 125)
+
+        self.i_reserve = tf.range(125, 140)
+
     def _build_model(self, layer_sizes):
-        state_input = Input(shape=(self.state_size, ))
+        state_input = Input(shape=(self.state_dim, ))
 
         dense1 = Dense(layer_sizes[0], kernel_initializer=HeNormal(), 
                        name='Dense1')(state_input)  # Can do # l2(0.001)
         dense1 = LeakyReLU(alpha=0.3)(dense1)
         # dense1 = BatchNormalization(name='dense1')(dense1)
 
-        # dense2 = Dense(layer_sizes[1], kernel_initializer=HeNormal(), name='Dense2')(dense1)
-        # dense2 = LeakyReLU(alpha=0.3)(dense2)
+        dense2 = Dense(layer_sizes[1], kernel_initializer=HeNormal(), 
+                       name='Dense2')(dense1)
+        dense2 = LeakyReLU(alpha=0.3)(dense2)
         # dense2 = BatchNormalization(name='Dense2')(dense2)
 
-        action = Dense(self.action_size, activation='linear', 
-                       kernel_initializer=HeNormal(), kernel_regularizer=l2(0.015), 
-                       name='action')(dense1)
+        action = Dense(self.action_dim, activation='linear', 
+                       kernel_initializer=HeNormal(),  #, kernel_regularizer=l2(0.015)
+                       name='action')(dense2)
 
         model = tf.keras.Model(inputs=state_input, outputs=action)
-        lr_schedule = ExponentialDecay(self.lr, decay_steps=15, decay_rate=0.98, staircase=False)
+        lr_schedule = ExponentialDecay(self.lr, decay_steps=60, decay_rate=0.98, staircase=False)
         model.compile(loss='mse', optimizer=Adam(learning_rate=lr_schedule, clipnorm=1.0))
         return model
     
@@ -81,9 +100,9 @@ class RLAgent:
         else:
             # Should be run with preexisting memory from 
             # training.find_fastest_game because this memory is bad
-            dummy_state = np.zeros(self.state_size, dtype=np.float32)
-            dummy_mask = np.ones(self.action_size, dtype=bool)
-            loaded_memory = [[dummy_state, 1, 1, dummy_state, 1, dummy_mask]]
+            dummy_state = np.zeros(self.state_dim, dtype=np.float32)
+            dummy_mask = np.ones(self.action_dim, dtype=bool)
+            loaded_memory = [[dummy_state, 1, 1, dummy_state, dummy_mask, 1]]
 
         return deque(loaded_memory, maxlen=50_000)
     
@@ -110,27 +129,21 @@ class RLAgent:
 
     @tf.function
     def get_predictions(self, state, legal_mask):
-        if tf.random.uniform(()) <= self.epsilon:
-            qs = tf.random.uniform([self.action_size])
-        else:
-            state = tf.reshape(state, [1, self.state_size])
-            qs = self.model(state, training=False)[0]
-        
+        """Returns q-values (random if we explore)"""
+        r = tf.random.uniform(())
+        qs = tf.cond(
+            r <= self.epsilon,
+            lambda: tf.random.uniform([self.action_dim]),  # Exploration
+            lambda: self.model(state[None, :], training=False)[0]  # Exploitation
+        )
+        # Set illegal moves' q to -inf
         return tf.where(legal_mask, qs, tf.fill(qs.shape, -tf.float32.max))
 
-    def remember(self, memory, legal_mask) -> None:
-        self.memory[-1].append(legal_mask.copy())  # Avoids recalculation, but overall I regret this method
+    def remember(self, memory) -> None:
         self.memory.append(deepcopy(memory))
 
     @tf.function
-    def _batch_train(self, batch) -> None:
-        states = tf.convert_to_tensor([mem[0] for mem in batch], dtype=tf.float32)
-        actions = tf.convert_to_tensor([mem[1] for mem in batch], dtype=tf.int32)
-        rewards = tf.convert_to_tensor([mem[2] for mem in batch], dtype=tf.float32)
-        next_states = tf.convert_to_tensor([mem[3] for mem in batch], dtype=tf.float32)
-        dones = tf.convert_to_tensor([mem[4] for mem in batch], dtype=tf.float32)
-        legal_masks = tf.convert_to_tensor([mem[5] for mem in batch], dtype=tf.bool)
-
+    def _batch_train(self, states, actions, rewards, next_states, legal_masks, dones) -> None:
         # Calculate this turn's qs with primary model
         qs = self.model(states, training=False)
 
@@ -144,7 +157,7 @@ class RLAgent:
         selected_next_qs = tf.gather_nd(next_qs, tf.stack([tf.range(len(next_actions)), next_actions], axis=1))
 
         # Ground qs with reward and value trajectory
-        targets = rewards + dones * self.gamma * selected_next_qs
+        targets = rewards + (1.0-dones) * self.gamma * selected_next_qs
         actions_indices = tf.stack([tf.range(len(actions)), actions], axis=1)
         target_qs = tf.tensor_scatter_nd_update(qs, actions_indices, targets)
 
@@ -155,45 +168,81 @@ class RLAgent:
         gradients = tape.gradient(loss, self.model.trainable_variables)
         self.model.optimizer.apply_gradients(zip(gradients, self.model.trainable_variables))
 
+        return qs, loss  # Used in tensorboard logging
+
+    def _tensorboard(self, actions, rewards, qs, loss):
         # Log
-        if self.tensorboard:
-            self.step += 1
-            step = self.step
-            with self.tensorboard.as_default():
-                # Training Metrics
-                current_lr = self.model.optimizer.learning_rate
-                tf.summary.scalar('Training Metrics/learning_rate', current_lr, step=step)
-                tf.summary.histogram('Training Metrics/action_hist', actions, step=step)
-                tf.summary.scalar('Training Metrics/batch_loss', tf.reduce_mean(loss), step=step)
-                tf.summary.scalar('Training Metrics/epsilon', self.epsilon, step=step)
-                tf.summary.scalar('Training Metrics/avg_reward', tf.reduce_mean(rewards), step=step)  # Global average reward
+        self.step += 1
+        step = self.step
+        with self.tensorboard.as_default():
+            # Training Metrics
+            current_lr = self.model.optimizer.learning_rate
+            tf.summary.scalar('Training Metrics/learning_rate', current_lr, step=step)
+            tf.summary.histogram('Training Metrics/action_hist', actions, step=step)
+            tf.summary.scalar('Training Metrics/batch_loss', tf.reduce_mean(loss), step=step)
+            tf.summary.scalar('Training Metrics/epsilon', self.epsilon, step=step)
+            tf.summary.scalar('Training Metrics/avg_reward', tf.reduce_mean(rewards), step=step)  # Global average reward
 
 
-                # Q-Values
-                legal_qs = tf.where(tf.math.is_finite(qs), qs, tf.zeros_like(qs))  # Removes NaN and inf
-                tf.summary.scalar('Q-Values/avg_q', tf.reduce_mean(legal_qs), step=step)  # Global average q
+            # Q-Values
+            legal_qs = tf.where(tf.math.is_finite(qs), qs, tf.zeros_like(qs))  # Removes NaN and inf
+            avg_qs = tf.reduce_mean(legal_qs)
+            tf.summary.scalar('Average Q-Values/avg_q', avg_qs, step=step)  # Global average q
 
-                tf.summary.scalar('Q-Values/avg_take_1', tf.reduce_mean(legal_qs[:5]), step=step)  # Take a single token (really 3)
-                tf.summary.scalar('Q-Values/avg_take_2', tf.reduce_mean(legal_qs[5:10]), step=step)  # Take two tokens of a single kind
-                tf.summary.scalar('Q-Values/avg_discard', tf.reduce_mean(legal_qs[10:15]), step=step)  # Discard a single token
+            # Take actions
+            # qs
+            take_3_qs = tf.gather(legal_qs, self.i_take_3, axis=1)
+            take_2_qs = tf.gather(legal_qs, self.i_take_2, axis=1)
+            other_takes_qs = tf.gather(legal_qs, self.i_other_takes, axis=1)
+            # avg and normalize
+            take_3_qs = tf.reduce_mean(take_3_qs) - avg_qs
+            take_2_qs = tf.reduce_mean(take_2_qs) - avg_qs
+            other_takes_qs = tf.reduce_mean(other_takes_qs) - avg_qs
+            # log
+            tf.summary.scalar('Average Q-Values/take_3', take_3_qs, step=step)
+            tf.summary.scalar('Average Q-Values/take_2', take_2_qs, step=step)
+            tf.summary.scalar('Average Q-Values/other_takes', other_takes_qs, step=step)
 
-                tf.summary.scalar('Q-Values/avg_buy_tier_1', tf.reduce_mean(legal_qs[15:27]), step=step)  # Buying actions (each tier)
-                tf.summary.scalar('Q-Values/avg_buy_tier_2', tf.reduce_mean(legal_qs[27:39]), step=step)
-                tf.summary.scalar('Q-Values/avg_buy_tier_3', tf.reduce_mean(legal_qs[39:45]), step=step)
+            # qs
+            buy_tier1_qs = tf.gather(legal_qs, self.i_buy_tier1, axis=1)
+            buy_tier2_qs = tf.gather(legal_qs, self.i_buy_tier2, axis=1)
+            buy_tier3_qs = tf.gather(legal_qs, self.i_buy_tier3, axis=1)
+            buy_reserved_qs = tf.gather(legal_qs, self.i_buy_reserved, axis=1)
+            # avg and normalize
+            buy_tier1_qs = tf.reduce_mean(buy_tier1_qs) - avg_qs
+            buy_tier2_qs = tf.reduce_mean(buy_tier2_qs) - avg_qs
+            buy_tier3_qs = tf.reduce_mean(buy_tier3_qs) - avg_qs
+            buy_reserved_qs = tf.reduce_mean(buy_reserved_qs) - avg_qs
+            # log
+            tf.summary.scalar('Average Q-Values/buy_tier1', buy_tier1_qs, step=step)  # Buy actions
+            tf.summary.scalar('Average Q-Values/buy_tier2', buy_tier2_qs, step=step)
+            tf.summary.scalar('Average Q-Values/buy_tier3', buy_tier3_qs, step=step)
+            tf.summary.scalar('Average Q-Values/buy_reserved', buy_reserved_qs, step=step)
 
-                tf.summary.scalar('Q-Values/avg_reserve', tf.reduce_mean(legal_qs[45:]), step=step)  # Reserve actions
+            reserve_qs = tf.gather(legal_qs, self.i_reserve, axis=1)
+            reserve_qs = tf.reduce_mean(reserve_qs) - avg_qs
+            tf.summary.scalar('Average Q-Values/avg_reserve', reserve_qs, step=step)  # Reserve actions
 
 
-                # Weights
-                for layer in self.model.layers:
-                    if hasattr(layer, 'kernel') and layer.kernel is not None:
-                        weights = layer.kernel
-                        tf.summary.histogram('Model Weights/' + layer.name + '_weights', weights, step=step)
+            # Weights
+            for layer in self.model.layers:
+                if hasattr(layer, 'kernel') and layer.kernel is not None:
+                    weights = layer.kernel
+                    tf.summary.histogram('Model Weights/' + layer.name + '_weights', weights, step=step)
 
     def replay(self) -> None:
-        """Standard replay function used in off-policy RL"""
+        """Standard off-policy replay"""
         batch = sample(self.memory, self.batch_size)
-        self._batch_train(batch)
+
+        states = tf.convert_to_tensor([mem[0] for mem in batch], dtype=tf.float32)
+        actions = tf.convert_to_tensor([mem[1] for mem in batch], dtype=tf.int32)
+        rewards = tf.convert_to_tensor([mem[2] for mem in batch], dtype=tf.float32)
+        next_states = tf.convert_to_tensor([mem[3] for mem in batch], dtype=tf.float32)
+        legal_masks = tf.convert_to_tensor([mem[4] for mem in batch], dtype=tf.bool)
+        dones = tf.convert_to_tensor([mem[5] for mem in batch], dtype=tf.float32)
+
+        qs, loss = self._batch_train(states, actions, rewards, next_states, legal_masks, dones)
+        self._tensorboard(actions, rewards, qs, loss)
         
         # Decrease exploration
         if self.epsilon > self.epsilon_min:
@@ -202,4 +251,3 @@ class RLAgent:
     def save_model(self) -> None:
         self.model.save(self.paths['model_save_path'])
         print(f"Saved the model at {self.paths['model_save_path']}")
-        

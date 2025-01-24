@@ -3,7 +3,7 @@
 import os
 from datetime import datetime, timedelta
 
-from RL import ddqn_loop, debug_game, find_fastest_game  # type: ignore
+from RL import ddqn_loop, find_fastest_game  # type: ignore
 
 
 def get_unique_filename(layer_sizes):
@@ -52,14 +52,15 @@ def get_paths(layer_sizes, model_from_name, memory_buffer_name):
     return paths
 
 def main():
-    layer_sizes = [64]
+    layer_sizes = [512, 256]
     model_from_name = None  # "64_01_14_04_51.keras"
-    memory_buffer = 'random_memory.pkl'  # 'memory.pkl' 'random_memory.pkl'
+    memory_buffer = None  # 'memory.pkl' 'random_memory.pkl'
     paths = get_paths(layer_sizes, model_from_name, memory_buffer)
     print(paths)
 
     # Function calls
-    ddqn_loop(paths, log_rate=10)
+    # TO DO - MAKE VERSION WITHOUT SEPARATE DISCARD INDICES
+    ddqn_loop(paths, log_rate=0)
         #! Comment line 205 in player.py!
     # debug_game(paths, memory_buffer=None)
     # find_fastest_game(paths, n_games=2, log_states=False)

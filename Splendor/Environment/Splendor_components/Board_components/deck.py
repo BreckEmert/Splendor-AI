@@ -49,7 +49,3 @@ class Deck:
 
     def draw(self):
         return self.cards.pop() if self.cards else None
-
-    def peek_vector(self):
-        return self.cards[-1].vector if self.cards else np.zeros(11)
-    
