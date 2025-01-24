@@ -190,7 +190,6 @@ class RLAgent:
 
     def replay(self) -> None:
         """Standard off-policy replay"""
-        print(len(self.memory))
         batch = sample(self.memory, self.batch_size)
         self._batch_train(batch)
         

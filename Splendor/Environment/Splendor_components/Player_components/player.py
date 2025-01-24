@@ -57,7 +57,6 @@ class Player:
             len(self.all_takes_2_diff) * 3 +  # 10 * 3
             len(self.all_takes_1) * 2         # 5 * 2
         )
-        print("Length of self.take_dim: ", self.take_dim)
 
         self.buy_dim = (
             3 *  # 3 tiers
@@ -66,13 +65,11 @@ class Player:
             3 *  # 3 reserve slots
             2    # Buy with and without gold
         )
-        print("Length of self.buy_dim: ", self.buy_dim)
 
         self.reserve_dim = (
             3 *  # 3 tiers
             5    # 4 cards per tier + top of deck
         )
-        print("Length of self.reserve_dim: ", self.reserve_dim)
 
         self.action_dim = self.take_dim + self.buy_dim + self.reserve_dim
 
@@ -85,7 +82,6 @@ class Player:
         self.card_ids[card.tier][card.gem].append(card.id)
 
     def _auto_spend(self, raw_cost, with_gold):
-        print("self.gems upon entering _auto_spend_gold: ", self.gems)
         assert np.all(self.gems >= 0), "self.gems is bad before _auto_spend_gold"
         """For now, random spend logic.  Modifies player gems 
         IN PLACE.  Also ENSURE that this and other methods 
@@ -95,7 +91,6 @@ class Player:
 
         # Discount the cost with our purchased cards
         card_cost = np.maximum(raw_cost - self.cards, 0)
-        print("card cost: ", card_cost)
 
         # IMPLEMENT A HOG MOVE?  Often we don't want to relenquish colors.
         # Pay with regular gems
@@ -109,37 +104,30 @@ class Player:
 
         # Subtract the spent gems
         self.gems -= spent_gems
-        print("_auto_spend spent_gems: ", spent_gems)
         assert np.all(self.gems >= 0), "self.gems is bad after _auto_spend_gold"
         return spent_gems
 
-    def _auto_take(self, gems_to_take):
-        assert self.gems.sum() <= 10, f"player.gems gt 10 before _auto_take: {self.gems}"
-        print(self.gems, gems_to_take)
-        print("_auto_take self.gems and gems_to_take: ", self.gems, gems_to_take)
+    def auto_take(self, gems_to_take):
+        assert self.gems.sum() <= 10, f"player.gems gt 10 before auto_take: {self.gems}"
         """
         Add gems_to_take to self.gems[:5], and if total exceeds 10,
         discard enough gems to get back to 10 or fewer. 
         Returns (net_gems, discards).
         """
-        # Handle gold-only takes (reserving reward)
-        if len(gems_to_take) == 6:
-            self.gems += gems_to_take
+        # Add gems to self.gems and handle reserve gold reward
+        self.gems[:5] += gems_to_take[:5]  # Always add gems
+        if len(gems_to_take) == 6:         # Add gold if it's there
+            self.gems[5] += gems_to_take[5]
             gems_to_take = gems_to_take[:5]
-            self_gems = self.gems[:5]
-        else:
-            self_gems = self.gems[:5]
-            self_gems += gems_to_take
+        self_gems = self.gems[:5]
         
         # Now discard if required
         n_discards = max(0, self.gems.sum() - 10)
-        print("n_discards", n_discards)
         discards = np.zeros(5, dtype=int)
 
         while discards.sum() < n_discards:
             # Try to prefer discarding gems we didn't take
             discard_prefs = np.where((self_gems > 0) & (gems_to_take == 0))[0]
-            print("discard_prefs: ", discard_prefs)
             if discard_prefs.size > 0:
                 color = np.random.choice(discard_prefs)
             else:
@@ -150,8 +138,13 @@ class Player:
             self_gems[color] -= 1
             discards[color] += 1
 
-        assert self.gems.sum() <= 10, f"player.gems gt 10 after _auto_take: {self.gems}"
-        return gems_to_take - discards
+        assert self.gems.sum() <= 10, f"player.gems gt 10 after auto_take: {self.gems}"
+        net_take = gems_to_take - discards
+
+        # Add back on the gold if 
+        if len(gems_to_take) == 6:
+            net_take = np.append(net_take, [1])
+        return net_take  # Only return gems actually taken
 
     def _get_legal_takes(self, board_gems):
         """For each possible take, there are ||take|| possible
@@ -264,7 +257,6 @@ class Player:
         return legal_reserve_mask
 
     def get_legal_moves(self, board):
-        print("Self and board gems upon entering get_legal_moves: ", self.gems, board.gems)
         legal_take_mask = self._get_legal_takes(board.gems)
         legal_buy_mask = self._get_legal_buys(board.cards)
         legal_reserve_mask = self._get_legal_reserves(board)
