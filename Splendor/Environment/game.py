@@ -20,6 +20,11 @@ class Game:
             player.reset()
 
         self.half_turns: int = 0
+<<<<<<< Updated upstream
+=======
+        self.move_index: int = 0
+        self.turn_penalty: float = -0.5
+>>>>>>> Stashed changes
         self.victor: bool = False
     
     @property
@@ -45,7 +50,6 @@ class Game:
         self.half_turns += 1
 
     def apply_move(self, chosen_move_index):
-        reward = 0
         player, board = self.active_player, self.board
 
         # Take gems moves
@@ -62,7 +66,7 @@ class Game:
             taken_gems = player.auto_take(gems_to_take)
             board.take_gems(taken_gems)
 
-            return 0  # No reward
+            return self.turn_penalty
 
         # Buy card moves
         chosen_move_index -= player.take_dim
@@ -98,7 +102,7 @@ class Game:
                 reward += 5
                 self.model.memory[-1][2] -= 5  # Loser reward
             
-            return reward
+            return reward + self.turn_penalty
         
         # Reserve card moves
         chosen_move_index -= player.buy_dim
@@ -114,10 +118,16 @@ class Game:
                 reserved_card, gold = board.reserve_from_deck(tier)
 
             player.reserved_cards.append(reserved_card)
+<<<<<<< Updated upstream
             discard_if_gt10 = player.auto_take(gold)
             board.take_gems(discard_if_gt10)
+=======
+            if gold[5]:
+                discard_if_gt10 = player.auto_take(gold)
+                board.take_gems(discard_if_gt10)
+>>>>>>> Stashed changes
 
-            return 0
+            return self.turn_penalty
 
     def _check_noble_visit(self, player):
         visited = 0

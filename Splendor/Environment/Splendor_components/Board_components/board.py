@@ -50,7 +50,7 @@ class Board:
         if self.gems[5]:
             self.gems[5] -= 1
             gold[5] = 1
-
+        
         # Replace card
         card = self.take_card(tier, position)
         return card, gold
@@ -61,9 +61,10 @@ class Board:
         if self.gems[5]:
             self.gems[5] -= 1
             gold[5] = 1
-
+        
         # Remove card
-        return self.deck_mapping[tier].draw(), gold
+        card = self.deck_mapping[tier].draw()
+        return card, gold
         
     def to_state_vector(self):
         tier_vector = [
