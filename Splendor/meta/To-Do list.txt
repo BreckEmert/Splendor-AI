@@ -1,20 +1,22 @@
-False memories - 
-Implement a calculated path between card purchases which is much more direct, by simulating and replacing the memories.
+Making learning easier ideas:
+- We should try modifying the board gem limit, as well, and the player gem limit.
+    Board limit has been modified
+    Implementing infinite player gems right now
+- Shortfall vectors - clipping card cost minus effective player gems so the model knows costs.
 
-Technically it would be super easy to remove the take 2 and incorporate it into take_tokens_loop.  The question is whether this is feasible for the RL model to know the history - which it isn't in the current state.
+Reward ideas:
+- We can do a negative reward for having the same gems as the enemy player
+    Or when the enemy player buys a card that aligns with your gems
+- Probably best to do an exponential reward based on similarity to top similar cards
+
+Improving the state vector ideas:
+- Buying what percentage of each gem.  have a dimension 6 vector and just have that be the percentage of gems purchased.
+- Include enemy cards purchasable next turn.  The active player should also have the cards that they can afford, but for the following turn... within a range of gems?  As in, legal within any legal take possibility this turn?
+
+Hyperparameter:
+- Confirm Huber vs MSE, and keep this in mind for later.
+- Replay buffer is definitely going to stay a constant concern.  Needs calculated often.
 
 
-We can do a negative reward for having the same gems as the enemy player
-Or when the enemy player buys a card that aligns with your gems
-Probably best to do an exponential reward based on similarity to top similar cards
-Most of the weights are zero so I assume that means it's using biases mostly.  We need to get it to extract more information, do we need to increase the state size?  Is there any information I left out?  We can include all of the original ideas before starting the ML, the ideas of making a brute-force approach.  Include statistics on the cards.
-
-Obviously yes as last time an action head might be nice.  If concatenation is working this well (Though it might just be the normalization of re-introducing the state) maybe an actual head will work well.  Also, 
-
-We should try modifying the board gem limit, as well, and the player gem limit.
-
-Check if our next state legal masking is working by seeing if
-discard, _ = player.choose_discard(self.to_vector(), player.gems, reward=-3/15)
-actually ends up with discarding as the only legal moves.  Genious!
-
-Buying what percentage of each gem.  have a dimension 6 vector and just have that be the percentage of gems purchased.
+After we're done:
+- Intelligent loss: When a move to purchase something was good, it means that moves with a high similarity must also be good.  That is, if I take 1 red, 1 blue, and 1 brown, and this was truly the best move, then taking any 2 of those three is *likely* to be good.  Enough so that providing a loss signal of at least 1/10 that value early on in training will be helpful.

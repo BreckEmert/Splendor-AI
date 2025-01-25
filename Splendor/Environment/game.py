@@ -8,10 +8,13 @@ from Environment.Splendor_components.Player_components.player import Player
 
 class Game:
     def __init__(self, players, model):
-        """Note: rest of init is performed by reset."""
+        """Note: rest of init is performed by reset()"""
         self.players = [Player(name, rl_model) for name, rl_model in players]
         self.model = model
         self.reset()
+        
+        self.discard_penalty: float = -0.05  # < 25 moves / 15 gems / 3 gems
+        self.final_reward: float = 5.0
 
     def reset(self):
         self.board = Board()
@@ -20,6 +23,7 @@ class Game:
             player.reset()
 
         self.half_turns: int = 0
+        self.move_index: int = 0
         self.victor: bool = False
     
     @property
@@ -28,14 +32,20 @@ class Game:
 
     def turn(self):
         # Log previous state for model memory
-        state = self.to_state_vector()
+        state = self.to_state()
 
         # Apply primary move
         move_index = self.active_player.choose_move(self.board, state)
+        self.move_index = move_index
         reward = self.apply_move(move_index)
 
+        assert np.all(self.board.gems >= 0), "Board gems lt0"
+        assert np.all(self.board.gems[:5] <= 4), "Board gems gt10"
+        assert self.active_player.gems.sum() >= 0, "Player gems lt0"
+        assert self.active_player.gems.sum() <= 10, "Player gems gt10"
+
         # Remember
-        next_state = self.to_state_vector()
+        next_state = self.to_state()
         legal_mask = self.active_player.get_legal_moves(self.board)
         sarsld = [state, move_index, reward, 
                   next_state, legal_mask, 
@@ -45,7 +55,6 @@ class Game:
         self.half_turns += 1
 
     def apply_move(self, chosen_move_index):
-        reward = 0
         player, board = self.active_player, self.board
 
         # Take gems moves
@@ -59,10 +68,11 @@ class Game:
             else: # chosen_move_index < 95  # all_takes_1; 5 * 2discards
                 gems_to_take = player.all_takes_1[(chosen_move_index-85) // 2]
 
-            taken_gems = player.auto_take(gems_to_take)
+            taken_gems, n_discards = player.auto_take(gems_to_take)
             board.take_gems(taken_gems)
 
-            return 0  # No reward
+            reward = self.discard_penalty * n_discards
+            return reward
 
         # Buy card moves
         chosen_move_index -= player.take_dim
@@ -76,7 +86,7 @@ class Game:
 
             # Player spends the tokens
             with_gold = chosen_move_index % 2  # All odd indices are gold spends
-            spent_gems = player._auto_spend(bought_card.cost, with_gold=with_gold)
+            spent_gems = player.auto_spend(bought_card.cost, with_gold=with_gold)
 
             # Board gets them back
             board.return_gems(spent_gems)
@@ -85,18 +95,23 @@ class Game:
             player.get_bought_card(bought_card)
 
             """Noble visit and end-of-game"""
+            # Base reward value
             reward = bought_card.points
             reward += 3 * self._check_noble_visit(player)
+
             # Capping any points past 15
-            original_points = player.points + bought_card.points  # player already got points so need to take them back
-            # Normalizing by 3, so avg reward is around 1 when buying
-            reward = min(reward, 15 - original_points) / 3
+            original_points = player.points - bought_card.points  # player already got points so need to take them back
+            reward = min(reward, 15 - original_points)  / 2
 
             if player.points >= 15:
                 self.victor = True
                 player.victor = True
-                reward += 5
-                self.model.memory[-1][2] -= 5  # Loser reward
+                reward += self.final_reward
+                """Yes, I am 100% positive that this [-1] indexing works fine.
+                # Notice that this is apply_move(), which gets ran BEFORE
+                # remember() does, so this is still the loser's memory."""
+                self.model.memory[-1][2] -= self.final_reward  # Loser reward
+                self.model.memory[-1][5] = True  # Mark loser's memory as done
             
             return reward
         
@@ -113,11 +128,14 @@ class Game:
             else:  # Reserve top
                 reserved_card, gold = board.reserve_from_deck(tier)
 
+            n_discards = 0
             player.reserved_cards.append(reserved_card)
-            discard_if_gt10 = player.auto_take(gold)
-            board.take_gems(discard_if_gt10)
+            if gold[5]:
+                discard_if_gt10, n_discards = player.auto_take(gold)
+                board.take_gems(discard_if_gt10)
 
-            return 0
+            reward = self.discard_penalty * n_discards
+            return reward
 
     def _check_noble_visit(self, player):
         visited = 0
@@ -128,12 +146,14 @@ class Game:
                 visited += 1
         return visited
     
-    def to_state_vector(self):
-        board_vector = self.board.to_state_vector()  # length 156
-        active_player = self.active_player.to_state_vector()  # length 46
-        enemy_player = self.players[(self.half_turns+1) % 2].to_state_vector()  # length 46
+    def to_state(self):
+        cur_player = self.active_player
+        enemy_player = self.players[(self.half_turns+1) % 2]
 
-        vector = np.concatenate((board_vector, active_player, enemy_player))
-        # assert len(vector) == 248, f"Game vector is length {len(vector)}"
+        board_vector = self.board.to_state(cur_player.effective_gems)        # 157
+        hero_vector = self.active_player.to_state()                          # 47
+        enemy_vector = enemy_player.to_state()                               # 47
+
+        vector = np.concatenate((board_vector, hero_vector, enemy_vector))   # 251
         return vector.astype(np.float32)
     

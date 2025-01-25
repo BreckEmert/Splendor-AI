@@ -3,14 +3,14 @@
 import os
 from datetime import datetime, timedelta
 
-from RL import ddqn_loop, find_fastest_game  # type: ignore
+from RL import ddqn_loop, find_fastest_game
 
 
 def get_unique_filename(layer_sizes):
-    nickname = "_".join(map(str, layer_sizes))
+    nickname = "-".join(map(str, layer_sizes))
     timestamp = datetime.now() - timedelta(hours=6)
-    timestamp = timestamp.strftime("%m_%d_%H_%M")  # mm/dd/hh/mm
-    return f"{nickname}_{timestamp}"
+    timestamp = timestamp.strftime("%m-%d-%H-%M")  # mm/dd/hh/mm
+    return f"{timestamp}__{nickname}"
 
 def get_paths(layer_sizes, model_from_name, memory_buffer_name):
     """I use '_dir' for folders and '_path' for things with extensions.
@@ -37,8 +37,7 @@ def get_paths(layer_sizes, model_from_name, memory_buffer_name):
         "memory_buffer_path": memory_buffer_path, 
         "rl_dir": rl_dir, 
         "saved_files_dir": saved_files_dir, 
-        # "log_dir": os.path.join(saved_files_dir, "game_logs"), 
-        "states_log_dir": os.path.join(saved_files_dir, "game_states", nickname), 
+        "images_dir": os.path.join(saved_files_dir, "rendered_games", nickname), 
         "tensorboard_dir": os.path.join(saved_files_dir, "tensorboard_logs", nickname)
     }
 
@@ -52,16 +51,14 @@ def get_paths(layer_sizes, model_from_name, memory_buffer_name):
     return paths
 
 def main():
-    layer_sizes = [512, 256]
-    model_from_name = None  # "64_01_14_04_51.keras"
-    memory_buffer = None  # 'memory.pkl' 'random_memory.pkl'
+    layer_sizes = [64, 64]
+    model_from_name = None  # "01-25-22-05__256-256.keras"
+    memory_buffer = 'memory.pkl'  # 'memory.pkl' 'random_memory.pkl'
     paths = get_paths(layer_sizes, model_from_name, memory_buffer)
     print(paths)
 
     # Function calls
-    # TO DO - MAKE VERSION WITHOUT SEPARATE DISCARD INDICES
     ddqn_loop(paths, log_rate=0)
-        #! Comment line 205 in player.py!
     # debug_game(paths, memory_buffer=None)
     # find_fastest_game(paths, n_games=2, log_states=False)
         # !Uncomment line 205 in player.py!
@@ -69,11 +66,12 @@ def main():
  
 if __name__ == "__main__":
     """If you're ever having issues make sure everything you pull from 
-    the game is immutable - using .copy() and copy.deepcopy() where needed.  
-    Also note that the model will remember multiple times per turn, 
-    because of the system I have to deal with the combinatoric space 
-    required to take 3 tokens in a single pass.  This means states, game
-    frames, and memories may not agree in length.
+    the game is immutable - using .copy() and copy.deepcopy() where needed.
     """
-    main()
-       
+    main()  
+    
+    # Currently bad changes that OBSTRUCT normal play:
+        # player.cards is set to 1
+        # Not bad, but note that player.gems is subtracted from card.cost
+        # Both of those are just to aide with learning, and ideally removed
+        # Though normalizing card.cost is probably useful always
