@@ -6,38 +6,34 @@ import shutil
 from copy import deepcopy
 
 from Environment.game import Game
+from meta.generate_images import draw_game_state
 from RL import RLAgent, RandomAgent
 
 
 def ddqn_loop(paths, log_rate=0):
     """Add docstring
     """
+
+
     # Initialize players, their models, and a game (these get reset)
     model = RLAgent(paths)
     players = [('Player1', model), ('Player2', model)]
     game = Game(players, model)
     game_lengths = []
 
-    # Loop through games - can be stopped at any time
-    for episode in range(5000):  # Crashing after 750 now?
+    # Loop through games - safe to stop at any time
+    for episode in range(80000):
         game.reset()
-
+      
         # Enable logging
-        # if log_rate and episode%log_rate == 0:
-        #     log_path = os.path.join(paths['states_log_dir'], f"states_episode_{episode}.json")
-        #     log_state_file = open(log_path, 'w')
-        #     logging = True
-        # else:
-        #     logging = False
+        logging = (log_rate and episode%log_rate == 0)
 
         # Play a game
         while not game.victor:
             game.turn()
 
-            # if logging:
-            #     json.dump(game.to_state_vector(), log_state_file)
-            #     # need to also dump player.card_ids
-            #     log_state_file.write('\n')
+            if logging:
+                draw_game_state(game)
 
             if logging:
                 draw_game_state(episode, game)
@@ -46,22 +42,24 @@ def ddqn_loop(paths, log_rate=0):
         # Run replay after each game
         model.replay()
 
-        # Save every 10 episodes
+        # Update target model every 10 episodes
         if episode % 10 == 0:
             model.update_target_model()
 
+            # Printout avg game length every 100
             if episode % 100 == 0:
                 avg = sum(game_lengths)/len(game_lengths)/2
                 print(f"Episode: {episode}")
                 print(f"Average turns for last 100 games: {avg}")
                 game_lengths = []
 
-                if episode % 500 == 0:
-                    model.save_model()
-                    model.write_memory()
+                # And save every 500 games
+                # if episode % 500 == 0:
+                #     model.save_model()
+                #     model.write_memory()
     
     # Save memory
-    model.write_memory()
+    # model.write_memory()
 
 def find_fastest_game(paths, n_games, log_states=False):
     """"Simulates tons of games, putting only ones below a move length 

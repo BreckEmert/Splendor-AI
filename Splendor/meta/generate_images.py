@@ -1,14 +1,80 @@
 # Splendor/meta/generate_images.py
 
-import json
 import os
-import shutil
+import itertools as it
 from PIL import Image, ImageDraw, ImageFont
 
+# Global references
+gem_types = ['white', 'blue', 'green', 'red', 'black', 'gold']
+font_path = "/workspace/meta/arialbd.ttf"
+font = ImageFont.truetype(font_path, 120)
+take_3_indices = list(it.combinations(range(5), 3))
+take_2_diff_indices = list(it.combinations(range(5), 2))
 
-def draw_game_state(game_state, index, image_save_path):
-    image_base_path = "/workspace/meta/images"
+# Convert a move index into text
+def move_to_text(move_index):
+    if move_index < 95:
+        if move_index < 40:
+            local_index = move_index
+            combo_index = local_index // 4
+            discard_idx = local_index % 4
+            combo = take_3_indices[combo_index]
+            combo_str = ", ".join(gem_types[color] for color in combo)
+            return (f"Take 3 different: {combo_str}" if discard_idx == 0
+                    else f"Take 3 different: {combo_str} (discard {discard_idx})")
+        elif move_index < 55:
+            local_index = move_index - 40
+            gem_index = local_index // 3
+            discard_idx = local_index % 3
+            color = gem_types[gem_index]
+            return (f"Take 2 same: {color}" if discard_idx == 0
+                    else f"Take 2 same: {color} (discard {discard_idx})")
+        elif move_index < 85:
+            local_index = move_index - 55
+            combo_index = local_index // 3
+            discard_idx = local_index % 3
+            combo = take_2_diff_indices[combo_index]
+            combo_str = " & ".join(gem_types[color] for color in combo)
+            return (f"Take 2 different: {combo_str}" if discard_idx == 0
+                    else f"Take 2 different: {combo_str} (discard {discard_idx})")
+        else:
+            local_index = move_index - 85
+            gem_index = local_index // 2
+            discard_idx = local_index % 2
+            color = gem_types[gem_index]
+            return (f"Take 1 {color}" if discard_idx == 0
+                    else f"Take 1 {color} (discard {discard_idx})")
+    elif move_index < 125:
+        buy_index = move_index - 95
+        if buy_index < 24:
+            board_card_idx = buy_index // 2
+            with_gold_flag = buy_index % 2
+            tier = board_card_idx // 4
+            position = board_card_idx % 4
+            txt = f"Buy tier {tier+1}, pos {position+1}"
+            return txt if with_gold_flag == 0 else txt + " [gold]"
+        else:
+            reserved_idx = (buy_index - 24) // 2
+            with_gold_flag = (buy_index - 24) % 2
+            txt = f"Buy reserved slot {reserved_idx+1}"
+            return txt if with_gold_flag == 0 else txt + " [gold]"
+    else:
+        reserve_index = move_index - 125
+        tier = reserve_index // 5
+        card_pos = reserve_index % 5
+        return (f"Reserve from tier {tier+1}, pos {card_pos+1}"
+                if card_pos < 4
+                else f"Reserve top card from tier {tier+1}")
 
+# Draw the game
+def render_game_state(game, turn, image_save_path):
+    board = game.board
+
+    # Blank canvas, paths, and start indices
+    base_path = "/workspace/meta/images"
+    table_path = os.path.join(base_path, "table.jpg")
+
+<<<<<<< HEAD
 # Convert a move index into text
 def move_to_text(move_index):
     if move_index < 95:
@@ -75,40 +141,52 @@ def render_game_state(game, image_save_path):
 
 
     # Canvas
+=======
+>>>>>>> 16fa8aa (image generation rework)
     width, height = 5000, 3000
-    path = "/workspace/meta/images/table.jpg"
-    canvas = Image.open(path).resize((width, height))
-    draw = ImageDraw.Draw(canvas)
+    canvas = Image.open(table_path).resize((width, height))
 
-    draw.text((50, 50), f"Turn order: {index//2 + 1}", fill=(255, 255, 255), font=font)
-
-    # Card and gem sizes
     card_width, card_height = 300, 400
-    gem_width, gem_height = 200, 200
+    gem_width, gem_height   = 200, 200
 
-    # Board and player offsets
     board_start_x, board_start_y = 200, 680
-    p1_start_x, p1_start_y = 2600, 200
-    p2_start_x, p2_start_y = 2600, 1700
+    p1_start_x, p1_start_y       = 2600, 200
+    p2_start_x, p2_start_y       = 2600, 1700
 
-    # Draw Board Cards
+    # Draw the move text
+    draw = ImageDraw.Draw(canvas)
+    draw.text((50, 50), f"Turn number: {turn//2 + 1}", fill=(255, 255, 255), font=font)
+
+    # Draw nobles
     board_x_offset = board_start_x
     board_y_offset = board_start_y
-    noble_spacing = 90
-    noble_space = 0
-    for tier, card_ids in reversed(game_state['board']['cards'].items()):
-        if tier == 'nobles':
-            noble_space = noble_spacing
-        card_image = Image.open(image_base_path + f"/{tier}/cover.jpg")
-        canvas.paste(card_image, (board_x_offset, board_y_offset))
-        board_x_offset += card_width + 50
-        for card_id in card_ids:
-            if card_id is not None:
-                card_image_path = image_base_path + f"/{tier}/{card_id}.jpg"
+    x_offset = board_start_x
+    for noble in board.nobles:
+        if noble is not None:
+            noble_path = os.path.join(base_path, "nobles", f"{noble.id}.jpg")
+            noble_img  = Image.open(noble_path)
+            canvas.paste(noble_img, (x_offset, board_y_offset))
+        x_offset += card_width + 50
+        board_y_offset += card_height + 50
+
+    # Draw board cards
+    board_x_offset = board_start_x
+
+    for i, tier in enumerate(board.cards):
+        cover_path = os.path.join(base_path, str(i), "cover.jpg")
+        cover_img = Image.open(cover_path)
+        canvas.paste(cover_img, (board_x_offset, board_y_offset))
+        x_offset = board_x_offset + card_width + 50
+
+        # Loop through cards in the tier
+        for card in tier:
+            if card is not None:
+                card_image_path = os.path.join(base_path, str(i), f"{card.id}.jpg")
                 card_image = Image.open(card_image_path)
-                canvas.paste(card_image, (board_x_offset, board_y_offset))
-                board_x_offset += card_width + noble_space + 10
-        noble_space = 0
+                canvas.paste(card_image, (x_offset, board_y_offset))
+
+            x_offset += card_width + 10
+
         board_y_offset += card_height + 50
     # Draw nobles
     x_offset = board_start_x + card_width + 50
@@ -144,80 +222,72 @@ def render_game_state(game, image_save_path):
         y_offset += card_height + 50
         board_x_offset = board_start_x
 
-    # Draw Gems
-    gem_x_offset = board_x_offset + card_width * 5 + 150
+    # Draw board gems
+    gem_x_offset = board_start_x + (card_width*5 + 150)
     gem_y_offset = board_start_y + int(card_height/2)
-    for gem in gem_types:
-        amount = game_state['board']['gems'][gem_types.index(gem)]
-        gem_image_path = image_base_path + f"/gems/{gem}.png"
-        gem_image = Image.open(gem_image_path)
-        canvas.paste(gem_image, (gem_x_offset-20, gem_y_offset-15), gem_image.split()[3])
-        draw.text((gem_x_offset + gem_width + 10, gem_y_offset), 
-                  str(amount), fill=(255, 255, 255), font=font)
-        gem_y_offset += gem_height + 40
+
+    for i, gems in enumerate(board.gems):
+        gem_img_path = os.path.join(base_path, "gems", f"{i}.png")
+        gem_image = Image.open(gem_img_path)
+        canvas.paste(gem_image, (gem_x_offset - 20, gem_y_offset - 15), gem_image.split()[3])
+        draw.text((gem_x_offset + gem_width + 10, gem_y_offset),
+                  str(gems), fill=(255, 255, 255), font=font)
+        gem_y_offset += (gem_height + 40)
 
     # Draw players
-    for i, (player_name, player_state) in enumerate(game_state['players'].items()):
-        if i == 0:
-            player_x_offset = p1_start_x
-            player_y_offset = p1_start_y
-        else:
-            player_x_offset = p2_start_x
-            player_y_offset = p2_start_y
+    start_positions = [(p1_start_x, p1_start_y), (p2_start_x, p2_start_y)]
+    for (player, (p_start_x, p_start_y)) in zip(game.players, start_positions):
+        current_x = p_start_x
+        current_y = p_start_y
 
-        # Draw gems
-        current_x_offset = player_x_offset
-        current_y_offset = player_y_offset
-        for gem_index, gem in enumerate(gem_types):
-            amount = player_state['gems'][gem_index]
-            gem_image_path = image_base_path + f"/gems/{gem}.png"
+        # Gems and owned cards
+        for i, gems in enumerate(player.gems):
+            gem_image_path = os.path.join(base_path, "gems", f"{i}.png")
             gem_image = Image.open(gem_image_path)
-            for _ in range(amount):
-                canvas.paste(gem_image, (current_x_offset, current_y_offset), gem_image.split()[3]) # trying alpha
-                current_y_offset += int(gem_height/1.7)
+            for _ in range(gems):
+                canvas.paste(gem_image, (current_x, current_y),
+                             gem_image.split()[3])
+                current_y += int(gem_height / 1.7)
 
-            # Draw cards for the same type
-            if gem != 'gold':
-                current_y_offset = player_y_offset + int(gem_height*2.1)
-                for tier_index in range(3):
-                    tier = f"tier{tier_index+1}"
-                    for card_id in player_state['cards'][tier_index][gem_index]:
-                        card_image_path = image_base_path + f"/{tier}/{card_id}.jpg"
-                        card_image = Image.open(card_image_path)
-                        canvas.paste(card_image, (current_x_offset, current_y_offset))
-                        current_y_offset += int(card_height/7)
-            current_x_offset += card_width + 50
-            current_y_offset = player_y_offset
+            # Owned cards for each tier (except gold)
+            if i != 5:
+                current_y = p_start_y + int(gem_height * 2.1)
+                for (tier, id) in player.card_ids[i]:
+                    card_img_path = os.path.join(base_path, str(tier), f"{id}.jpg")
+                    card_image = Image.open(card_img_path)
+                    canvas.paste(card_image, (current_x, current_y))
 
-        # Draw Reserved Cards
-        current_x_offset -= card_width + 50
-        current_y_offset = player_y_offset + 600
-        for tier_index, card_id in player_state['reserved_cards']:
-            tier = f"tier{tier_index+1}"
-            card_image_path = image_base_path + f"/{tier}/{card_id}.jpg"
-            card_image = Image.open(card_image_path)
-            canvas.paste(card_image, (current_x_offset, current_y_offset))
-            current_x_offset += int(card_width/3)
-            current_y_offset += int(card_height/3)
+                    current_y += int(card_height / 7)
 
-        # Draw move and reward
-        move = move_to_text(player_state['chosen_move'])
-        if move:
-            draw.text((int((p1_start_x+width/2)/2), 30+i*2800), move, fill=(255, 255, 255), font=font)
+            current_x += (card_width + 50)
+            current_y = p_start_y
 
-    # Save the image
+        # Reserved cards
+        current_x -= (card_width + 50)
+        current_y += 600
+        for card in player.reserved_cards:
+            img_path = os.path.join(base_path, str(card.tier), f"{card.id}.jpg")
+            card_image = Image.open(img_path)
+            canvas.paste(card_image, (current_x, current_y))
+
+            current_x += int(card_width / 3)
+            current_y += int(card_height / 3)
+        
+        # Player move
+        move_str = move_to_text(game.move_index)
+        draw.text((p_start_x, p_start_y - 80),
+                    f"Move: {move_str}", fill=(255, 255, 255), font=font)
+            
     canvas.save(image_save_path)
 
-def move_to_text(move_index):
-    mapping = {
-        0: 'white', 
-        1: 'blue', 
-        2: 'green', 
-        3: 'red', 
-        4: 'brown', 
-        5: 'gold'
-    }
+# function called from training.py
+def draw_game_state(game):
+    turn = game.half_turns
+    output_dir = game.model.paths['images_dir']
+    output_dir = os.path.join(output_dir, f'episode {turn}')
+    os.makedirs(output_dir, exist_ok=True)
 
+<<<<<<< HEAD
     tier = move_index % 15 // 4
     card_index = move_index % 15 % 4
 
@@ -307,3 +377,7 @@ def draw_game_state(episode, game):
 
     image_path = os.path.join(output_dir, f"turn_{game.half_turns}.jpg")
     render_game_state(game, image_path)
+=======
+    image_path = os.path.join(output_dir, f"turn_{turn}.jpg")
+    render_game_state(game, turn, image_path)
+>>>>>>> 16fa8aa (image generation rework)

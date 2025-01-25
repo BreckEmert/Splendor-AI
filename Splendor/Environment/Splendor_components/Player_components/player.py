@@ -18,7 +18,7 @@ class Player:
         self.cards: np.ndarray = np.zeros(5, dtype=int)  # No gold card so 5
         self.reserved_cards: list = []
 
-        self.card_ids: list = [[[] for _ in range(5)] for _ in range(4)]
+        self.card_ids: list = [[] for _ in range(5)]
         self.points: float = 0.0
         self.victor: bool = False
 
@@ -74,12 +74,12 @@ class Player:
         self.action_dim = self.take_dim + self.buy_dim + self.reserve_dim
 
     def get_bought_card(self, card):
-        """Handles all buying on the player's endexcept for 
+        """Handles all buying on the player's end except for 
         the gems, which is handled by _auto_discard.
         """
         self.cards[card.gem] += 1
         self.points += card.points
-        self.card_ids[card.tier][card.gem].append(card.id)
+        self.card_ids[card.gem].append((card.tier, card.id))
 
     def _auto_spend(self, raw_cost, with_gold):
         # assert np.all(self.gems >= 0), "self.gems is bad before _auto_spend_gold"
@@ -107,6 +107,7 @@ class Player:
         return spent_gems
 
     def auto_take(self, gems_to_take):
+        print("gems to take in auto_take: ", gems_to_take)
         # assert self.gems.sum() <= 10, f"player.gems gt 10 before auto_take: {self.gems}"
         """
         Add gems_to_take to self.gems[:5], and if total exceeds 10,
@@ -119,6 +120,7 @@ class Player:
         if gold_only:                      # Add gold if it's there
             self.gems[5] += gems_to_take[5]
             gems_to_take = gems_to_take[:5]
+            print("gold only identified")
         self_gems = self.gems[:5]
         
         # Now discard if required
@@ -140,6 +142,7 @@ class Player:
 
         # Gems we were supposed to take minus what we had to disard
         net_take = gems_to_take - discards
+        print("net take: ", net_take)
 
         # Add back on the gold
         if gold_only:
@@ -166,6 +169,10 @@ class Player:
         for gem_index in range(5):
             if board_gems[gem_index] >= 4:
                 legal_take_mask[40 + 3*gem_index + n_discards] = True
+        
+        # DELETE THIS LATER, but for now while the board has 10 gems it's fine
+        if legal_take_mask.sum():
+            return legal_take_mask
 
         """TAKE 2 (DIFFERENT)"""
         for index, combo in enumerate(self.all_takes_2_diff):
@@ -265,8 +272,6 @@ class Player:
     def choose_move(self, board, state):
         legal_mask = self.get_legal_moves(board)
         rl_moves = self.model.get_predictions(state, legal_mask)
-        # for l, r in zip(legal_mask, rl_moves):
-        #     print(l, r)
         return np.argmax(rl_moves)
 
     def to_state_vector(self):

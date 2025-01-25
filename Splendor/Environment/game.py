@@ -34,6 +34,7 @@ class Game:
 
         # Apply primary move
         move_index = self.active_player.choose_move(self.board, state)
+        self.move_index = move_index
         reward = self.apply_move(move_index)
 
         # Remember
@@ -51,6 +52,7 @@ class Game:
 
         # Take gems moves
         if chosen_move_index < player.take_dim:
+            print("take move")
             if chosen_move_index < 40: # all_takes_3; 10 * 4discards
                 gems_to_take = player.all_takes_3[chosen_move_index // 4]
             elif chosen_move_index < 55: # all_takes_2_same; 5 * 3discards
@@ -68,12 +70,14 @@ class Game:
         # Buy card moves
         chosen_move_index -= player.take_dim
         if chosen_move_index < player.buy_dim:
+            print("buy move")
             if chosen_move_index < 24:  # 12 cards * w&w/o gold
                 idx = chosen_move_index // 2
                 bought_card = board.take_card(idx//4, idx%4)  # Tier, card idx
             else:  # Buy reserved, 3 cards* w&w/o gold
                 card_index = (chosen_move_index-24) // 2
                 bought_card = player.reserved_cards.pop(card_index)
+            print(bought_card.tier, bought_card.id)
 
             # Player spends the tokens
             with_gold = chosen_move_index % 2  # All odd indices are gold spends
@@ -104,6 +108,7 @@ class Game:
         # Reserve card moves
         chosen_move_index -= player.buy_dim
         if chosen_move_index < player.reserve_dim:
+            print("reserve move")
             tier = chosen_move_index // 5  # 4 cards + top of deck
             card_index = chosen_move_index % 5
 
@@ -116,6 +121,7 @@ class Game:
 
             player.reserved_cards.append(reserved_card)
             discard_if_gt10 = player.auto_take(gold)
+            print(discard_if_gt10)
             board.take_gems(discard_if_gt10)
             if gold[5]:
                 discard_if_gt10 = player.auto_take(gold)
