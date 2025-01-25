@@ -82,6 +82,7 @@ def render_game_state(game, image_save_path):
     draw = ImageDraw.Draw(canvas)
 
 <<<<<<< Updated upstream
+<<<<<<< Updated upstream
     draw.text((50, 50), f"Turn order: {index//2 + 1}", fill=(255, 255, 255), font=font)
 
     # Card and gem sizes
@@ -113,6 +114,8 @@ def render_game_state(game, image_save_path):
         noble_space = 0
         board_y_offset += card_height + 50
 =======
+=======
+>>>>>>> Stashed changes
     # Draw nobles
     x_offset = board_start_x + card_width + 50
     y_offset = board_start_y
@@ -145,6 +148,9 @@ def render_game_state(game, image_save_path):
             x_offset += card_width + 10
 
         y_offset += card_height + 50
+<<<<<<< Updated upstream
+>>>>>>> Stashed changes
+=======
 >>>>>>> Stashed changes
         board_x_offset = board_start_x
 
@@ -313,4 +319,7 @@ def draw_game_state(episode, game):
 
     image_path = os.path.join(output_dir, f"turn_{game.half_turns}.jpg")
     render_game_state(game, image_path)
+<<<<<<< Updated upstream
+>>>>>>> Stashed changes
+=======
 >>>>>>> Stashed changes

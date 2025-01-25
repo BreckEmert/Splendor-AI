@@ -42,6 +42,9 @@ def ddqn_loop(paths, log_rate=0):
 =======
             if logging:
                 draw_game_state(episode, game)
+<<<<<<< Updated upstream
+>>>>>>> Stashed changes
+=======
 >>>>>>> Stashed changes
 
         game_lengths.append(game.half_turns)

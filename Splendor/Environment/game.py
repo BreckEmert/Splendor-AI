@@ -24,6 +24,9 @@ class Game:
 =======
         self.move_index: int = 0
         self.turn_penalty: float = -0.5
+<<<<<<< Updated upstream
+>>>>>>> Stashed changes
+=======
 >>>>>>> Stashed changes
         self.victor: bool = False
     
@@ -119,8 +122,14 @@ class Game:
 
             player.reserved_cards.append(reserved_card)
 <<<<<<< Updated upstream
+<<<<<<< Updated upstream
             discard_if_gt10 = player.auto_take(gold)
             board.take_gems(discard_if_gt10)
+=======
+            if gold[5]:
+                discard_if_gt10 = player.auto_take(gold)
+                board.take_gems(discard_if_gt10)
+>>>>>>> Stashed changes
 =======
             if gold[5]:
                 discard_if_gt10 = player.auto_take(gold)
