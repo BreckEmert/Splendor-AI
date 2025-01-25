@@ -28,12 +28,12 @@ class RLAgent:
         self.action_dim = 140
         self.batch_size = 64
 
-        self.memory = self.load_memory()
+        self.memory = self._load_memory()
 
-        self.gamma = 0.99  # 0.1**(1/25)
+        self.gamma = 0.9  # 0.1**(1/25)
         self.epsilon = 1.0
         self.epsilon_min = 0.04
-        self.epsilon_decay = 0.998
+        self.epsilon_decay = 0.999
         self.lr = 0.001
 
         model_from_path = paths['model_from_path']
@@ -91,7 +91,7 @@ class RLAgent:
         model.compile(loss='mse', optimizer=Adam(learning_rate=lr_schedule, clipnorm=1.0))
         return model
     
-    def load_memory(self):
+    def _load_memory(self):
         if self.paths['memory_buffer_path']:
             with open(self.paths['memory_buffer_path'], 'rb') as f:
                 flattened_memory = pickle.load(f)
@@ -154,7 +154,8 @@ class RLAgent:
 
         # Calculate next turn's qs with target model
         next_qs = self.target_model(next_states, training=False)
-        selected_next_qs = tf.gather_nd(next_qs, tf.stack([tf.range(len(next_actions)), next_actions], axis=1))
+        actions_indices = tf.stack([tf.range(len(next_actions)), next_actions], axis=1)
+        selected_next_qs = tf.gather_nd(next_qs, actions_indices)
 
         # Ground qs with reward and value trajectory
         targets = rewards + (1.0-dones) * self.gamma * selected_next_qs
