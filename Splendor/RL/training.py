@@ -34,19 +34,13 @@ def ddqn_loop(paths, log_rate=0):
         while not game.victor:
             game.turn()
 
-<<<<<<< Updated upstream
             # if logging:
             #     json.dump(game.to_state_vector(), log_state_file)
             #     # need to also dump player.card_ids
             #     log_state_file.write('\n')
-=======
+
             if logging:
                 draw_game_state(episode, game)
-<<<<<<< Updated upstream
->>>>>>> Stashed changes
-=======
->>>>>>> Stashed changes
-
         game_lengths.append(game.half_turns)
 
         # Run replay after each game

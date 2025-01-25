@@ -107,24 +107,11 @@ class Player:
         return spent_gems
 
     def auto_take(self, gems_to_take):
-<<<<<<< Updated upstream
-<<<<<<< Updated upstream
         # assert self.gems.sum() <= 10, f"player.gems gt 10 before auto_take: {self.gems}"
         """
         Add gems_to_take to self.gems[:5], and if total exceeds 10,
         discard enough gems to get back to 10 or fewer. 
         Returns (net_gems, discards).
-=======
-=======
->>>>>>> Stashed changes
-        """Add gems_to_take to self.gems, while accounting for 
-        discards by trying to discard gems that weren't taken.
-        This avoids combinatorial discard space does not 
-        significantly limit gameplay.
-<<<<<<< Updated upstream
->>>>>>> Stashed changes
-=======
->>>>>>> Stashed changes
         """
         # Add gems to self.gems and handle reserve gold reward
         self.gems[:5] += gems_to_take[:5]  # Always add gems

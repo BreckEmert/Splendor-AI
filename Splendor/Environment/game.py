@@ -20,14 +20,8 @@ class Game:
             player.reset()
 
         self.half_turns: int = 0
-<<<<<<< Updated upstream
-=======
         self.move_index: int = 0
         self.turn_penalty: float = -0.5
-<<<<<<< Updated upstream
->>>>>>> Stashed changes
-=======
->>>>>>> Stashed changes
         self.victor: bool = False
     
     @property
@@ -121,20 +115,14 @@ class Game:
                 reserved_card, gold = board.reserve_from_deck(tier)
 
             player.reserved_cards.append(reserved_card)
-<<<<<<< Updated upstream
-<<<<<<< Updated upstream
             discard_if_gt10 = player.auto_take(gold)
             board.take_gems(discard_if_gt10)
-=======
             if gold[5]:
                 discard_if_gt10 = player.auto_take(gold)
                 board.take_gems(discard_if_gt10)
->>>>>>> Stashed changes
-=======
             if gold[5]:
                 discard_if_gt10 = player.auto_take(gold)
                 board.take_gems(discard_if_gt10)
->>>>>>> Stashed changes
 
             return self.turn_penalty
 

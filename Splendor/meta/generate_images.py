@@ -6,10 +6,9 @@ import shutil
 from PIL import Image, ImageDraw, ImageFont
 
 
-<<<<<<< Updated upstream
 def draw_game_state(game_state, index, image_save_path):
     image_base_path = "/workspace/meta/images"
-=======
+
 # Convert a move index into text
 def move_to_text(move_index):
     if move_index < 95:
@@ -73,7 +72,7 @@ def render_game_state(game, image_save_path):
     # Blank canvas, paths, and start indices
     base_path = "/workspace/meta/images"
     table_path = os.path.join(base_path, "table.jpg")
->>>>>>> Stashed changes
+
 
     # Canvas
     width, height = 5000, 3000
@@ -81,8 +80,6 @@ def render_game_state(game, image_save_path):
     canvas = Image.open(path).resize((width, height))
     draw = ImageDraw.Draw(canvas)
 
-<<<<<<< Updated upstream
-<<<<<<< Updated upstream
     draw.text((50, 50), f"Turn order: {index//2 + 1}", fill=(255, 255, 255), font=font)
 
     # Card and gem sizes
@@ -113,9 +110,6 @@ def render_game_state(game, image_save_path):
                 board_x_offset += card_width + noble_space + 10
         noble_space = 0
         board_y_offset += card_height + 50
-=======
-=======
->>>>>>> Stashed changes
     # Draw nobles
     x_offset = board_start_x + card_width + 50
     y_offset = board_start_y
@@ -148,10 +142,6 @@ def render_game_state(game, image_save_path):
             x_offset += card_width + 10
 
         y_offset += card_height + 50
-<<<<<<< Updated upstream
->>>>>>> Stashed changes
-=======
->>>>>>> Stashed changes
         board_x_offset = board_start_x
 
     # Draw Gems
@@ -215,7 +205,6 @@ def render_game_state(game, image_save_path):
         if move:
             draw.text((int((p1_start_x+width/2)/2), 30+i*2800), move, fill=(255, 255, 255), font=font)
 
-<<<<<<< Updated upstream
     # Save the image
     canvas.save(image_save_path)
 
@@ -290,7 +279,6 @@ if __name__ == '__main__':
     font = ImageFont.truetype(font_path, 120)
 
     main(log_path, image_save_path)
-=======
         # Reserved cards
         current_x -= (card_width + 50)
         current_y += 600
@@ -319,7 +307,3 @@ def draw_game_state(episode, game):
 
     image_path = os.path.join(output_dir, f"turn_{game.half_turns}.jpg")
     render_game_state(game, image_path)
-<<<<<<< Updated upstream
->>>>>>> Stashed changes
-=======
->>>>>>> Stashed changes
