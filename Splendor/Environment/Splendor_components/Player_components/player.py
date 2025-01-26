@@ -233,8 +233,6 @@ class Player:
             else:
                 legal_buy_mask.extend([False, False])
 
-        length = len(legal_buy_mask)
-        # assert length == 30, f"legal_buy_mask is length {length}"
         return legal_buy_mask
 
     def _get_legal_reserves(self, board):
@@ -252,8 +250,6 @@ class Player:
         else:
             legal_reserve_mask = [False] * 15
         
-        length = len(legal_reserve_mask)
-        # assert length == 15, f"legal_reserve_mask is length {length}"
         return legal_reserve_mask
 
     def get_legal_moves(self, board):
@@ -271,17 +267,15 @@ class Player:
         return np.argmax(rl_moves)
 
     def to_state_vector(self):
-        reserved_cards_vector = np.zeros(33)
+        reserved_cards_vector = np.zeros(33)  # 11*3
         for i, card in enumerate(self.reserved_cards):
             reserved_cards_vector[i*11:(i+1)*11] = card.vector
 
         state_vector = np.concatenate((
-            self.gems / 4,  # length 6 (5 gold but 5/4 is ratio with others)
-            [sum(self.gems) / 10],  # length 1
-            self.cards / 4,  # length 5
-            reserved_cards_vector,  # length 11*3 = 33
-            [self.points / 15]  # length 1
+            self.gems / 4,          # 6
+            [self.gems.sum() / 10], # 1
+            self.cards / 4,         # 5
+            reserved_cards_vector,  # 33
+            [self.points / 15]      # 1
         ))
-
-        # # assert len(state_vector) == 46, "Player state is {len(state_vector)}"
         return state_vector  # length 46

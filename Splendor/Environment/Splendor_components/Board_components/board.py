@@ -72,14 +72,15 @@ class Board:
             for card in tier  # 4 cards per tier
         ]  # 11*4*3 = 132
         
-        nobles_vector = [ # 6*3
+        nobles_vector = [
             card.vector[5:] if card else np.zeros(6)
             for card in self.nobles
-        ]
+        ]  # 6*3
 
-        state_vector = np.concatenate((self.gems, *tier_vector, *nobles_vector))
-        # UPDATE: including self.gems again
-        # No longer including self.gems
-        # Need to fully decide on this.
-        # assert len(state_vector) == 156, f"board vector is {len(state_vector)}"
-        return state_vector  # length 156
+        state_vector = np.concatenate((
+            self.gems/4,            # 6
+            [self.gems.sum() / 10], # 1
+            *tier_vector,           # 132
+            *nobles_vector          # 18
+        ))
+        return state_vector  # 157

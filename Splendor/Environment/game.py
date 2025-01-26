@@ -8,10 +8,12 @@ from Environment.Splendor_components.Player_components.player import Player
 
 class Game:
     def __init__(self, players, model):
-        """Note: rest of init is performed by reset."""
+        """Note: rest of init is performed by reset()"""
         self.players = [Player(name, rl_model) for name, rl_model in players]
         self.model = model
         self.reset()
+        
+        self.turn_penalty: float = -0.2
 
     def reset(self):
         self.board = Board()
@@ -21,7 +23,6 @@ class Game:
 
         self.half_turns: int = 0
         self.move_index: int = 0
-        self.turn_penalty: float = -0.5
         self.victor: bool = False
     
     @property
@@ -87,11 +88,12 @@ class Game:
             player.get_bought_card(bought_card)
 
             """Noble visit and end-of-game"""
+            # Base reward value
             reward = bought_card.points
             reward += 3 * self._check_noble_visit(player)
+
             # Capping any points past 15
-            original_points = player.points + bought_card.points  # player already got points so need to take them back
-            # Normalizing by 3, so avg reward is around 1 when buying
+            original_points = player.points - bought_card.points  # player already got points so need to take them back
             reward = min(reward, 15 - original_points) / 3
 
             if player.points >= 15:
@@ -99,6 +101,7 @@ class Game:
                 player.victor = True
                 reward += 5
                 self.model.memory[-1][2] -= 5  # Loser reward
+                self.model.memory[-1][5] = True  # Mark loser's memory as done
             
             return reward + self.turn_penalty
         
@@ -132,11 +135,10 @@ class Game:
         return visited
     
     def to_state_vector(self):
-        board_vector = self.board.to_state_vector()  # length 156
-        active_player = self.active_player.to_state_vector()  # length 46
-        enemy_player = self.players[(self.half_turns+1) % 2].to_state_vector()  # length 46
+        board_vector = self.board.to_state_vector()  # 157
+        active_player = self.active_player.to_state_vector()  # 46
+        enemy_player = self.players[(self.half_turns+1) % 2].to_state_vector()  # 46
 
         vector = np.concatenate((board_vector, active_player, enemy_player))
-        # assert len(vector) == 248, f"Game vector is length {len(vector)}"
-        return vector.astype(np.float32)
+        return vector.astype(np.float32)  # 249
     

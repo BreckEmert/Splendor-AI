@@ -8,14 +8,14 @@ from random import sample
 import numpy as np
 
 import tensorflow as tf
-from keras.config import enable_unsafe_deserialization                 # type: ignore
-from keras.layers import Input, Dense, LeakyReLU, BatchNormalization   # type: ignore
-from keras.losses import mean_squared_error                            # type: ignore
-from keras.models import load_model                                    # type: ignore
-from keras.initializers import GlorotNormal, HeNormal                  # type: ignore
-from keras.optimizers import Adam                                      # type: ignore
-from keras.optimizers.schedules import ExponentialDecay                # type: ignore
-from keras.regularizers import l2                                      # type: ignore
+from keras.config import enable_unsafe_deserialization                 
+from keras.layers import Input, Dense, LeakyReLU, BatchNormalization   
+from keras.losses import mean_squared_error
+from keras.models import load_model
+from keras.initializers import GlorotNormal, HeNormal
+from keras.optimizers import Adam
+from keras.optimizers.schedules import ExponentialDecay
+from keras.regularizers import l2
 
 
 class RLAgent:
@@ -24,17 +24,19 @@ class RLAgent:
         enable_unsafe_deserialization()
         self.paths = paths
 
-        self.state_dim = 248
+        self.state_dim = 249
         self.action_dim = 140
-        self.batch_size = 64
+        self.batch_size = 128
 
         self.memory = self._load_memory()
 
-        self.gamma = 0.9  # 0.1**(1/25)
+        self.gamma = 0.995  # 0.1**(1/25)
         self.epsilon = 1.0
-        self.epsilon_min = 0.04
-        self.epsilon_decay = 0.999
+        self.epsilon_min = 0.02
+        self.epsilon_decay = 0.99995
         self.lr = 0.001
+        self.decay_steps = 250_000
+        self.decay_rate = 0.5
 
         model_from_path = paths['model_from_path']
         if model_from_path:
@@ -87,7 +89,10 @@ class RLAgent:
                        name='action')(dense2)
 
         model = tf.keras.Model(inputs=state_input, outputs=action)
-        lr_schedule = ExponentialDecay(self.lr, decay_steps=60, decay_rate=0.98, staircase=False)
+        lr_schedule = ExponentialDecay(self.lr, 
+                                       decay_steps = self.decay_steps, 
+                                       decay_rate = self.decay_rate, 
+                                       staircase = False)
         model.compile(loss='mse', optimizer=Adam(learning_rate=lr_schedule, clipnorm=1.0))
         return model
     
@@ -104,7 +109,7 @@ class RLAgent:
             dummy_mask = np.ones(self.action_dim, dtype=bool)
             loaded_memory = [[dummy_state, 1, 1, dummy_state, dummy_mask, 1]]
 
-        return deque(loaded_memory, maxlen=50_000)
+        return deque(loaded_memory, maxlen=100_000)
     
     def write_memory(self) -> None:
         memory_path = os.path.join(self.paths['saved_files_dir'], "memory.pkl")
@@ -186,9 +191,10 @@ class RLAgent:
 
 
             # Q-Values
+            folder = "Average Q-Values (normalized by global avg)"
             legal_qs = tf.where(tf.math.is_finite(qs), qs, tf.zeros_like(qs))  # Removes NaN and inf
             avg_qs = tf.reduce_mean(legal_qs)
-            tf.summary.scalar('Average Q-Values/avg_q', avg_qs, step=step)  # Global average q
+            tf.summary.scalar(f'{folder}/avg_q', avg_qs, step=step)  # Global average q
 
             # Take actions
             # qs
@@ -200,10 +206,11 @@ class RLAgent:
             take_2_qs = tf.reduce_mean(take_2_qs) - avg_qs
             other_takes_qs = tf.reduce_mean(other_takes_qs) - avg_qs
             # log
-            tf.summary.scalar('Average Q-Values/take_3', take_3_qs, step=step)
-            tf.summary.scalar('Average Q-Values/take_2', take_2_qs, step=step)
-            tf.summary.scalar('Average Q-Values/other_takes', other_takes_qs, step=step)
-
+            tf.summary.scalar(f'{folder}/take_3', take_3_qs, step=step)
+            tf.summary.scalar(f'{folder}/take_2', take_2_qs, step=step)
+            tf.summary.scalar(f'{folder}/other_takes', other_takes_qs, step=step)
+            
+            # Buy actions
             # qs
             buy_tier1_qs = tf.gather(legal_qs, self.i_buy_tier1, axis=1)
             buy_tier2_qs = tf.gather(legal_qs, self.i_buy_tier2, axis=1)
@@ -215,14 +222,14 @@ class RLAgent:
             buy_tier3_qs = tf.reduce_mean(buy_tier3_qs) - avg_qs
             buy_reserved_qs = tf.reduce_mean(buy_reserved_qs) - avg_qs
             # log
-            tf.summary.scalar('Average Q-Values/buy_tier1', buy_tier1_qs, step=step)  # Buy actions
-            tf.summary.scalar('Average Q-Values/buy_tier2', buy_tier2_qs, step=step)
-            tf.summary.scalar('Average Q-Values/buy_tier3', buy_tier3_qs, step=step)
-            tf.summary.scalar('Average Q-Values/buy_reserved', buy_reserved_qs, step=step)
+            tf.summary.scalar(f'{folder}/buy_tier1', buy_tier1_qs, step=step)
+            tf.summary.scalar(f'{folder}/buy_tier2', buy_tier2_qs, step=step)
+            tf.summary.scalar(f'{folder}/buy_tier3', buy_tier3_qs, step=step)
+            tf.summary.scalar(f'{folder}/buy_reserved', buy_reserved_qs, step=step)
 
             reserve_qs = tf.gather(legal_qs, self.i_reserve, axis=1)
             reserve_qs = tf.reduce_mean(reserve_qs) - avg_qs
-            tf.summary.scalar('Average Q-Values/avg_reserve', reserve_qs, step=step)  # Reserve actions
+            tf.summary.scalar(f'{folder}/reserve', reserve_qs, step=step)  # Reserve actions
 
 
             # Weights

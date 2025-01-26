@@ -178,9 +178,14 @@ def render_game_state(game, image_save_path):
         if player is not game.active_player:
             move_str = move_to_text(game.move_index)
             y_offset = -170 if player is game.players[0] else 1115
-            draw.text((p_start_x+200, p_start_y + y_offset),
+            draw.text((p_start_x, p_start_y + y_offset),
                         move_str, fill=(255, 255, 255), font=font)
-            
+        
+        # Player points
+        # points_str = f"Points: {player.points}"
+        # coords = (p_start_x - 150, p_start_y - 200)
+        # draw.text(coords, points_str, fill=(255, 255, 255), font=font)
+
     canvas.save(image_save_path)
 
 # function called from training.py
