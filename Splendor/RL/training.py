@@ -11,10 +11,6 @@ from RL import RLAgent, RandomAgent
 
 
 def ddqn_loop(paths, log_rate=0):
-    """Add docstring
-    """
-
-
     # Initialize players, their models, and a game (these get reset)
     model = RLAgent(paths)
     players = [('Player1', model), ('Player2', model)]
@@ -31,33 +27,34 @@ def ddqn_loop(paths, log_rate=0):
         # Play a game
         while not game.victor:
             game.turn()
+            
+            # Run replay every three turns
+            if game.half_turns % 10:
+                model.replay()
 
             if logging:
-                draw_game_state(game)
+                draw_game_state(episode, game)
 
         game_lengths.append(game.half_turns)
 
-        # Run replay after each game
-        model.replay()
+        # Printout avg game length every 50
+        if episode % 50 == 0:
+            avg = sum(game_lengths)/len(game_lengths)/2
+            print(f"Episode: {episode}")
+            print(f"Average turns for last 100 games: {avg}")
+            game_lengths = []
 
-        # Update target model every 10 episodes
-        if episode % 10 == 0:
-            model.update_target_model()
+            # Update target model every 80 episodes
+            if episode % 80 == 0:
+                model.update_target_model()
 
-            # Printout avg game length every 100
-            if episode % 100 == 0:
-                avg = sum(game_lengths)/len(game_lengths)/2
-                print(f"Episode: {episode}")
-                print(f"Average turns for last 100 games: {avg}")
-                game_lengths = []
-
-                # And save every 500 games
-                # if episode % 500 == 0:
-                #     model.save_model()
-                #     model.write_memory()
+                # Save every 200 games
+                if episode % 200 == 0:
+                    model.save_model()
+                    model.write_memory()
     
     # Save memory
-    # model.write_memory()
+    model.write_memory()
 
 def find_fastest_game(paths, n_games, log_states=False):
     """"Simulates tons of games, putting only ones below a move length 
