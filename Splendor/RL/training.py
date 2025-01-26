@@ -33,7 +33,7 @@ def ddqn_loop(paths, log_rate=0):
             game.turn()
 
             if logging:
-                draw_game_state(game)
+                draw_game_state(episode, game)
 
         game_lengths.append(game.half_turns)
 

@@ -107,20 +107,17 @@ class Player:
         return spent_gems
 
     def auto_take(self, gems_to_take):
-        print("gems to take in auto_take: ", gems_to_take)
-        # assert self.gems.sum() <= 10, f"player.gems gt 10 before auto_take: {self.gems}"
-        """
-        Add gems_to_take to self.gems[:5], and if total exceeds 10,
-        discard enough gems to get back to 10 or fewer. 
-        Returns (net_gems, discards).
+        """Add gems_to_take to self.gems, while accounting for 
+        discards by trying to discard gems that weren't taken.
+        This avoids combinatorial discard space does not 
+        significantly limit gameplay.
         """
         # Add gems to self.gems and handle reserve gold reward
         self.gems[:5] += gems_to_take[:5]  # Always add gems
         gold_only = len(gems_to_take) == 6
-        if gold_only:         # Add gold if it's there
+        if gold_only:                      # Add gold if it's there
             self.gems[5] += gems_to_take[5]
             gems_to_take = gems_to_take[:5]
-            print("gold only identified")
         self_gems = self.gems[:5]
         
         # Now discard if required
@@ -140,14 +137,14 @@ class Player:
             self_gems[color] -= 1
             discards[color] += 1
 
-        # assert self.gems.sum() <= 10, f"player.gems gt 10 after auto_take: {self.gems}"
+        # Gems we were supposed to take minus what we had to disard
         net_take = gems_to_take - discards
-        print("net take: ", net_take)
 
-        # Add back on the gold if 
+        # Add back on the gold
         if gold_only:
             net_take = np.append(net_take, [1])
-        return net_take  # Only return gems actually taken
+
+        return net_take
 
     def _get_legal_takes(self, board_gems):
         """For each possible take, there are ||take|| possible

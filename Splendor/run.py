@@ -59,7 +59,7 @@ def main():
 
     # Function calls
     # TO DO - MAKE VERSION WITHOUT SEPARATE DISCARD INDICES
-    ddqn_loop(paths, log_rate=0)
+    ddqn_loop(paths, log_rate=1)
         #! Comment line 205 in player.py!
     # debug_game(paths, memory_buffer=None)
     # find_fastest_game(paths, n_games=2, log_states=False)

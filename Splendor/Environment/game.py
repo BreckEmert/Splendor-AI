@@ -21,6 +21,7 @@ class Game:
 
         self.half_turns: int = 0
         self.move_index: int = 0
+        self.turn_penalty: float = -0.5
         self.victor: bool = False
     
     @property
@@ -47,12 +48,10 @@ class Game:
         self.half_turns += 1
 
     def apply_move(self, chosen_move_index):
-        reward = 0
         player, board = self.active_player, self.board
 
         # Take gems moves
         if chosen_move_index < player.take_dim:
-            print("take move")
             if chosen_move_index < 40: # all_takes_3; 10 * 4discards
                 gems_to_take = player.all_takes_3[chosen_move_index // 4]
             elif chosen_move_index < 55: # all_takes_2_same; 5 * 3discards
@@ -65,19 +64,17 @@ class Game:
             taken_gems = player.auto_take(gems_to_take)
             board.take_gems(taken_gems)
 
-            return 0  # No reward
+            return self.turn_penalty
 
         # Buy card moves
         chosen_move_index -= player.take_dim
         if chosen_move_index < player.buy_dim:
-            print("buy move")
             if chosen_move_index < 24:  # 12 cards * w&w/o gold
                 idx = chosen_move_index // 2
                 bought_card = board.take_card(idx//4, idx%4)  # Tier, card idx
             else:  # Buy reserved, 3 cards* w&w/o gold
                 card_index = (chosen_move_index-24) // 2
                 bought_card = player.reserved_cards.pop(card_index)
-            print(bought_card.tier, bought_card.id)
 
             # Player spends the tokens
             with_gold = chosen_move_index % 2  # All odd indices are gold spends
@@ -103,12 +100,11 @@ class Game:
                 reward += 5
                 self.model.memory[-1][2] -= 5  # Loser reward
             
-            return reward
+            return reward + self.turn_penalty
         
         # Reserve card moves
         chosen_move_index -= player.buy_dim
         if chosen_move_index < player.reserve_dim:
-            print("reserve move")
             tier = chosen_move_index // 5  # 4 cards + top of deck
             card_index = chosen_move_index % 5
 
@@ -120,11 +116,11 @@ class Game:
                 reserved_card, gold = board.reserve_from_deck(tier)
 
             player.reserved_cards.append(reserved_card)
-            discard_if_gt10 = player.auto_take(gold)
-            print(discard_if_gt10)
-            board.take_gems(discard_if_gt10)
+            if gold[5]:
+                discard_if_gt10 = player.auto_take(gold)
+                board.take_gems(discard_if_gt10)
 
-            return 0
+            return self.turn_penalty
 
     def _check_noble_visit(self, player):
         visited = 0
