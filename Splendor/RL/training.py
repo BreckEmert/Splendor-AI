@@ -20,6 +20,7 @@ def ddqn_loop(paths, log_rate=0):
     # Loop through games - safe to stop at any time
     for episode in range(80000):
         game.reset()
+        step_counter = 0
       
         # Enable logging
         logging = (log_rate and episode%log_rate == 0)
@@ -27,31 +28,33 @@ def ddqn_loop(paths, log_rate=0):
         # Play a game
         while not game.victor:
             game.turn()
+            step_counter += 1
             
-            # Run replay every three turns
-            if game.half_turns % 10:
+            # Run replay
+            if step_counter%10 == 0:
                 model.replay()
 
+            # Draw the game state
             if logging:
                 draw_game_state(episode, game)
 
         game_lengths.append(game.half_turns)
 
-        # Printout avg game length every 50
-        if episode % 50 == 0:
+        # Print avg game length
+        if episode % 100 == 0:
             avg = sum(game_lengths)/len(game_lengths)/2
             print(f"Episode: {episode}")
-            print(f"Average turns for last 100 games: {avg}")
+            print(f"Average half turns for last 100 games: {avg}")
             game_lengths = []
 
-            # Update target model every 80 episodes
-            if episode % 80 == 0:
-                model.update_target_model()
+        # Update target model
+        if episode % 300 == 0:
+            model.update_target_model()
 
-                # Save every 200 games
-                if episode % 200 == 0:
-                    model.save_model()
-                    model.write_memory()
+        # Save the model and memory
+        if episode % 1000 == 0:
+            model.save_model()
+            model.write_memory()
     
     # Save memory
     model.write_memory()

@@ -51,8 +51,8 @@ def get_paths(layer_sizes, model_from_name, memory_buffer_name):
     return paths
 
 def main():
-    layer_sizes = [256, 256]
-    model_from_name = None  # "64_01_14_04_51.keras"
+    layer_sizes = [256, 128]
+    model_from_name = None  # "01-25-22-05__256-256.keras"
     memory_buffer = 'memory.pkl'  # 'memory.pkl' 'random_memory.pkl'
     paths = get_paths(layer_sizes, model_from_name, memory_buffer)
     print(paths)
@@ -68,5 +68,8 @@ if __name__ == "__main__":
     """If you're ever having issues make sure everything you pull from 
     the game is immutable - using .copy() and copy.deepcopy() where needed.
     """
-    main()
-       
+    main()  # DELETE BAD CHANGES LATER:
+    # Currently bad changes:
+    # # PLAYER RECEIVES NO LEGAL TAKE MOVES
+    # # Board has 10 of each gem
+    # # player.cards is set to 100 so it can buy whatever it wants

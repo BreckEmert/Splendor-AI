@@ -13,7 +13,7 @@ class Game:
         self.model = model
         self.reset()
         
-        self.turn_penalty: float = -0.2
+        self.turn_penalty: float = 0.0  # Testing 0?
 
     def reset(self):
         self.board = Board()
@@ -90,11 +90,11 @@ class Game:
             """Noble visit and end-of-game"""
             # Base reward value
             reward = bought_card.points
-            reward += 3 * self._check_noble_visit(player)
+            # reward += 3 * self._check_noble_visit(player)  # UNCOMMENT THIS LATER
 
             # Capping any points past 15
             original_points = player.points - bought_card.points  # player already got points so need to take them back
-            reward = min(reward, 15 - original_points) / 3
+            reward = min(reward, 15 - original_points)  # No longer /3
 
             if player.points >= 15:
                 self.victor = True

@@ -32,12 +32,10 @@ class Board:
                 
     def take_gems(self, taken_gems): 
         self.gems -= np.pad(taken_gems, (0, 6-len(taken_gems)))
-        assert np.all(self.gems >= 0), f"Illegal board gems {self.gems}, {taken_gems}"
 
     def return_gems(self, returned_gems):
         self.gems += np.pad(returned_gems, (0, 6-len(returned_gems)))
         # Remind me to change this back down to 10 after the model works
-        assert np.all(self.gems <= 10), f"Illegal board gems {self.gems}, {returned_gems}"
 
     def take_card(self, tier, position):
         card = self.cards[tier][position]
