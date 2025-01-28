@@ -47,12 +47,8 @@ def ddqn_loop(paths, log_rate=0):
             print(f"Average half turns for last 100 games: {avg}")
             game_lengths = []
 
-        # Update target model
-        if episode % 300 == 0:
-            model.update_target_model()
-
         # Save the model and memory
-        if episode % 1000 == 0:
+        if episode % 500 == 0:
             model.save_model()
             model.write_memory()
     

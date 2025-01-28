@@ -27,17 +27,18 @@ class RLAgent:
         # Dimensions
         self.state_dim = 249
         self.action_dim = 140
-        self.batch_size = 256
+        self.batch_size = 128
 
         # Initial memory, note batch size/replay_freq is samples per memory
-        self.replay_buffer_size = 50_000
+        #  10k/50 = 200 games but memories are correlated as both current and enemy player are stored
+        self.replay_buffer_size = 10_000
         self.memory = self._load_memory()
 
         # Huber loss
-        self.huber = Huber()
+        # self.huber = Huber()
 
         # Gamma
-        self.gamma = 0.0  # 0.1**(1/25)
+        self.gamma = 0.98  # 0.1**(1/25)
 
         # Epsilon
         self.epsilon = 1.0
@@ -45,9 +46,10 @@ class RLAgent:
         self.epsilon_decay = 0.9995
 
         # Learning rate
-        self.lr = 0.0005
-        self.decay_steps = 250_000
+        self.lr = 0.001
+        self.decay_steps = 80_000
         self.decay_rate = 0.1
+        self.tau = 0.001
 
         model_from_path = paths['model_from_path']
         if model_from_path:
@@ -60,7 +62,7 @@ class RLAgent:
             self.model._name = "policy_model"
             self.target_model = self._build_model(paths['layer_sizes'])
             self.target_model._name = "target_model"
-            self.update_target_model()
+            self.target_model.set_weights(self.model.get_weights())
 
         # Tensorboard logging
         self.tensorboard = tf.summary.create_file_writer(paths['tensorboard_dir'])
@@ -126,6 +128,11 @@ class RLAgent:
                        name='dense2')(dense1)
         dense2 = LeakyReLU(alpha=0.3)(dense2)
 
+        # # Layer 3
+        # dense3 = Dense(layer_sizes[1], kernel_initializer=HeNormal(), 
+        #                name='dense3')(dense2)
+        # dense3 = LeakyReLU(alpha=0.3)(dense3)
+
         # Action layer
         action = Dense(self.action_dim, activation='linear', 
                        kernel_initializer=HeNormal(),  #, kernel_regularizer=l2(0.015)
@@ -181,8 +188,11 @@ class RLAgent:
 
         print(f"Wrote {len(memory)} memories to {memory_path}")
 
-    def update_target_model(self) -> None:
-        self.target_model.set_weights(self.model.get_weights())
+    def _update_target_model(self) -> None:
+        """Could be done with tf_agents.utils.common.soft_variables_update"""
+        weights = zip(self.target_model.trainable_weights, self.model.trainable_weights)
+        for target_weights, policy_weights in weights:
+            target_weights.assign(self.tau*policy_weights + (1-self.tau)*target_weights)
 
     @tf.function
     def get_predictions(self, state, legal_mask):
@@ -223,7 +233,8 @@ class RLAgent:
         # Fit
         with tf.GradientTape() as tape:
             predictions = self.model(states, training=True)
-            loss = self.huber(target_qs, predictions)
+            # loss = self.huber(target_qs, predictions)
+            loss = mean_squared_error(target_qs, predictions)
         gradients = tape.gradient(loss, self.model.trainable_variables)
         self.model.optimizer.apply_gradients(zip(gradients, self.model.trainable_variables))
 
@@ -256,8 +267,8 @@ class RLAgent:
             ############################################
             folder = "Average Q-Values (normalized by global avg)"
             legal_qs = tf.where(tf.math.is_finite(qs), qs, tf.zeros_like(qs))  # Removes NaN and inf
-            avg_qs = tf.reduce_mean(legal_qs)
-            tf.summary.scalar(f'{folder}/_avg_q', avg_qs, step=step)  # Global average q
+            avg_q = tf.reduce_mean(legal_qs)
+            tf.summary.scalar(f'{folder}/_avg_q', avg_q, step=step)  # Global average q
 
             """Q-values of take moves"""
             # qs
@@ -265,9 +276,9 @@ class RLAgent:
             take_2_qs = tf.gather(legal_qs, self.i_take_2, axis=1)
             other_takes_qs = tf.gather(legal_qs, self.i_other_takes, axis=1)
             # avg and normalize
-            take_3_qs = tf.reduce_mean(take_3_qs) - avg_qs
-            take_2_qs = tf.reduce_mean(take_2_qs) - avg_qs
-            other_takes_qs = tf.reduce_mean(other_takes_qs) - avg_qs
+            take_3_qs = tf.reduce_mean(take_3_qs) - avg_q
+            take_2_qs = tf.reduce_mean(take_2_qs) - avg_q
+            other_takes_qs = tf.reduce_mean(other_takes_qs) - avg_q
             # log
             tf.summary.scalar(f'{folder}/take_3', take_3_qs, step=step)
             tf.summary.scalar(f'{folder}/take_2', take_2_qs, step=step)
@@ -280,10 +291,10 @@ class RLAgent:
             buy_tier3_qs = tf.gather(legal_qs, self.i_buy_tier3, axis=1)
             buy_reserved_qs = tf.gather(legal_qs, self.i_buy_reserved, axis=1)
             # avg and normalize
-            buy_tier1_qs = tf.reduce_mean(buy_tier1_qs) - avg_qs
-            buy_tier2_qs = tf.reduce_mean(buy_tier2_qs) - avg_qs
-            buy_tier3_qs = tf.reduce_mean(buy_tier3_qs) - avg_qs
-            buy_reserved_qs = tf.reduce_mean(buy_reserved_qs) - avg_qs
+            buy_tier1_qs = tf.reduce_mean(buy_tier1_qs) - avg_q
+            buy_tier2_qs = tf.reduce_mean(buy_tier2_qs) - avg_q
+            buy_tier3_qs = tf.reduce_mean(buy_tier3_qs) - avg_q
+            buy_reserved_qs = tf.reduce_mean(buy_reserved_qs) - avg_q
             # log
             tf.summary.scalar(f'{folder}/.buy_tier1', buy_tier1_qs, step=step)
             tf.summary.scalar(f'{folder}/.buy_tier2', buy_tier2_qs, step=step)
@@ -293,7 +304,7 @@ class RLAgent:
             """Q-values of reserve moves"""
             # Reserve actions
             reserve_qs = tf.gather(legal_qs, self.i_reserve, axis=1)
-            reserve_qs = tf.reduce_mean(reserve_qs) - avg_qs
+            reserve_qs = tf.reduce_mean(reserve_qs) - avg_q
             tf.summary.scalar(f'{folder}/_reserve', reserve_qs, step=step)
 
             """Q-values of buys by point value"""
@@ -325,7 +336,7 @@ class RLAgent:
 
             # Log each point bucket
             for p in range(num_buckets):
-                tf.summary.scalar(f'BuyQ/points_{p}', mean_by_pts[p], step=step)
+                tf.summary.scalar(f'BuyQ/points_{p}', mean_by_pts[p] - avg_q, step=step)
 
 
             """Model weights"""
@@ -354,6 +365,9 @@ class RLAgent:
         # Decrease exploration
         if self.epsilon > self.epsilon_min:
             self.epsilon *= self.epsilon_decay
+            
+        # Update target model
+        self._update_target_model()
 
     def save_model(self) -> None:
         self.model.save(self.paths['model_save_path'])

@@ -13,7 +13,9 @@ class Game:
         self.model = model
         self.reset()
         
-        self.turn_penalty: float = 0.0  # Testing 0?
+        self.turn_penalty: float = -0.0  # Testing 0?
+        self.discard_penalty: float = -0.3  # < 25 moves / 15 gems / 3 gems
+        self.final_reward: float = 5.0
 
     def reset(self):
         self.board = Board()
@@ -37,6 +39,11 @@ class Game:
         move_index = self.active_player.choose_move(self.board, state)
         self.move_index = move_index
         reward = self.apply_move(move_index)
+
+        # assert np.all(self.board.gems >= 0), "Board gems lt0"
+        # assert np.all(self.board.gems[:5] <= 4), "Board gems gt10"
+        # assert self.active_player.gems.sum() >= 0, "Player gems lt0"
+        # assert self.active_player.gems.sum() <= 10, "Player gems gt10"
 
         # Remember
         next_state = self.to_state_vector()
@@ -62,10 +69,11 @@ class Game:
             else: # chosen_move_index < 95  # all_takes_1; 5 * 2discards
                 gems_to_take = player.all_takes_1[(chosen_move_index-85) // 2]
 
-            taken_gems = player.auto_take(gems_to_take)
+            taken_gems, n_discards = player.auto_take(gems_to_take)
             board.take_gems(taken_gems)
 
-            return self.turn_penalty
+            reward = self.discard_penalty * n_discards
+            return reward + self.turn_penalty
 
         # Buy card moves
         chosen_move_index -= player.take_dim
@@ -90,17 +98,17 @@ class Game:
             """Noble visit and end-of-game"""
             # Base reward value
             reward = bought_card.points
-            # reward += 3 * self._check_noble_visit(player)  # UNCOMMENT THIS LATER
+            reward += 3 * self._check_noble_visit(player)  # UNCOMMENT THIS LATER
 
             # Capping any points past 15
             original_points = player.points - bought_card.points  # player already got points so need to take them back
-            reward = min(reward, 15 - original_points)  # No longer /3
+            reward = min(reward, 15 - original_points)  / 2
 
             if player.points >= 15:
                 self.victor = True
                 player.victor = True
-                reward += 5
-                self.model.memory[-1][2] -= 5  # Loser reward
+                reward += self.final_reward
+                self.model.memory[-1][2] -= self.final_reward  # Loser reward
                 self.model.memory[-1][5] = True  # Mark loser's memory as done
             
             return reward + self.turn_penalty
@@ -118,12 +126,14 @@ class Game:
             else:  # Reserve top
                 reserved_card, gold = board.reserve_from_deck(tier)
 
+            n_discards = 0
             player.reserved_cards.append(reserved_card)
             if gold[5]:
-                discard_if_gt10 = player.auto_take(gold)
+                discard_if_gt10, n_discards = player.auto_take(gold)
                 board.take_gems(discard_if_gt10)
 
-            return self.turn_penalty
+            reward = self.discard_penalty * n_discards
+            return reward + self.turn_penalty
 
     def _check_noble_visit(self, player):
         visited = 0

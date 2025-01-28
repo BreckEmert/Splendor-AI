@@ -16,7 +16,7 @@ class Player:
     def reset(self):
         self.gems: np.ndarray = np.zeros(6, dtype=int)  # Gold gem so 6
         # self.cards: np.ndarray = np.zeros(5, dtype=int)  # No gold card so 5
-        self.cards = np.full(5, 100, dtype=int)  # DELETE THIS LATER, UNCOMMENT CHECK NOBLES
+        self.cards = np.full(5, 1, dtype=int)  # DELETE THIS LATER, UNCOMMENT CHECK NOBLES
         self.reserved_cards: list = []
 
         self.card_ids: list = [[] for _ in range(5)]
@@ -143,7 +143,7 @@ class Player:
         if gold_only:
             net_take = np.append(net_take, [1])
 
-        return net_take
+        return net_take, n_discards
 
     def _get_legal_takes(self, board_gems):
         """For each possible take, there are ||take|| possible
@@ -152,8 +152,6 @@ class Player:
         """
         board_gems = board_gems[:5]
         legal_take_mask = np.zeros(95, dtype=bool)
-
-        # return legal_take_mask  # DELETE LATER
 
         """TAKE 3"""
         n_discards = max(0, -7+self.gems.sum())
@@ -166,10 +164,6 @@ class Player:
         for gem_index in range(5):
             if board_gems[gem_index] >= 4:
                 legal_take_mask[40 + 3*gem_index + n_discards] = True
-        
-        # DELETE THIS LATER, but for now while the board has 10 gems it's fine
-        if legal_take_mask.sum():
-            return legal_take_mask
 
         """TAKE 2 (DIFFERENT)"""
         for index, combo in enumerate(self.all_takes_2_diff):
