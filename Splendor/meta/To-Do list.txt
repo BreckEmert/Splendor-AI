@@ -18,3 +18,7 @@ Improving the state vector ideas:
 Hyperparameter:
 - Confirm Huber vs MSE, and keep this in mind for later.
 - Replay buffer is definitely going to stay a constant concern.  Needs calculated often.
+
+
+After we're done:
+- Intelligent loss: When a move to purchase something was good, it means that moves with a high similarity must also be good.  That is, if I take 1 red, 1 blue, and 1 brown, and this was truly the best move, then taking any 2 of those three is *likely* to be good.  Enough so that providing a loss signal of at least 1/10 that value early on in training will be helpful.

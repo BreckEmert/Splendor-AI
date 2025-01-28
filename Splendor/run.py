@@ -68,7 +68,10 @@ if __name__ == "__main__":
     """If you're ever having issues make sure everything you pull from 
     the game is immutable - using .copy() and copy.deepcopy() where needed.
     """
-    main()  # DELETE BAD CHANGES LATER:
+    main()  
+    
+    
+    # DELETE BAD CHANGES LATER:
     # Currently bad changes:
     # # PLAYER RECEIVES NO LEGAL TAKE MOVES
     # # Board has 10 of each gem

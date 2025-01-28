@@ -8,7 +8,7 @@ from .deck import Deck
 class Board:
     def __init__(self):
         # Gems
-        self.gems = np.array([10, 10, 10, 10, 10, 5], dtype=int)  # [white, blue, green, red, black, gold]
+        self.gems = np.array([4, 4, 4, 4, 4, 5], dtype=int)  # [white, blue, green, red, black, gold]
 
         # Decks
         self.tier1 = Deck(0)
