@@ -11,9 +11,7 @@ Reward ideas:
 
 Improving the state vector ideas:
 - Buying what percentage of each gem.  have a dimension 6 vector and just have that be the percentage of gems purchased.
-- *preposterous* but setting a couple specific weights ahead?  I'm struggling to believe that adding in all the
-    dimensions that I want to add is a good idea.  It very well could be, but could also be accomplished so easily 
-    by changing just a couple biases.  I suppose this gets entirely overwritten by training?  Unlearnable then?
+- Include enemy cards purchasable next turn.  The active player should also have the cards that they can afford, but for the following turn... within a range of gems?  As in, legal within any legal take possibility this turn?
 
 Hyperparameter:
 - Confirm Huber vs MSE, and keep this in mind for later.

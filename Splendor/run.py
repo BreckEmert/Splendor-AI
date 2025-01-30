@@ -51,7 +51,7 @@ def get_paths(layer_sizes, model_from_name, memory_buffer_name):
     return paths
 
 def main():
-    layer_sizes = [256, 128]
+    layer_sizes = [128, 64]
     model_from_name = None  # "01-25-22-05__256-256.keras"
     memory_buffer = 'memory.pkl'  # 'memory.pkl' 'random_memory.pkl'
     paths = get_paths(layer_sizes, model_from_name, memory_buffer)
@@ -70,9 +70,8 @@ if __name__ == "__main__":
     """
     main()  
     
-    
-    # DELETE BAD CHANGES LATER:
-    # Currently bad changes:
-    # # PLAYER RECEIVES NO LEGAL TAKE MOVES
-    # # Board has 10 of each gem
-    # # player.cards is set to 100 so it can buy whatever it wants
+    # Currently bad changes that OBSTRUCT normal play:
+        # player.cards is set to 1
+        # Not bad, but note that player.gems is subtracted from card.cost
+        # Both of those are just to aide with learning, and ideally removed
+        # Though normalizing card.cost is probably useful always

@@ -13,8 +13,7 @@ class Game:
         self.model = model
         self.reset()
         
-        self.turn_penalty: float = -0.0  # Testing 0?
-        self.discard_penalty: float = -0.3  # < 25 moves / 15 gems / 3 gems
+        self.discard_penalty: float = -0.05  # < 25 moves / 15 gems / 3 gems
         self.final_reward: float = 5.0
 
     def reset(self):
@@ -33,7 +32,7 @@ class Game:
 
     def turn(self):
         # Log previous state for model memory
-        state = self.to_state_vector()
+        state = self.to_state()
 
         # Apply primary move
         move_index = self.active_player.choose_move(self.board, state)
@@ -46,7 +45,7 @@ class Game:
         # assert self.active_player.gems.sum() <= 10, "Player gems gt10"
 
         # Remember
-        next_state = self.to_state_vector()
+        next_state = self.to_state()
         legal_mask = self.active_player.get_legal_moves(self.board)
         sarsld = [state, move_index, reward, 
                   next_state, legal_mask, 
@@ -73,7 +72,7 @@ class Game:
             board.take_gems(taken_gems)
 
             reward = self.discard_penalty * n_discards
-            return reward + self.turn_penalty
+            return reward
 
         # Buy card moves
         chosen_move_index -= player.take_dim
@@ -98,7 +97,7 @@ class Game:
             """Noble visit and end-of-game"""
             # Base reward value
             reward = bought_card.points
-            reward += 3 * self._check_noble_visit(player)  # UNCOMMENT THIS LATER
+            reward += 3 * self._check_noble_visit(player)
 
             # Capping any points past 15
             original_points = player.points - bought_card.points  # player already got points so need to take them back
@@ -108,10 +107,13 @@ class Game:
                 self.victor = True
                 player.victor = True
                 reward += self.final_reward
+                """Yes, I am 100% positive that this [-1] indexing works fine.
+                # Notice that this is apply_move(), which gets ran BEFORE
+                # remember() does, so this is still the loser's memory."""
                 self.model.memory[-1][2] -= self.final_reward  # Loser reward
                 self.model.memory[-1][5] = True  # Mark loser's memory as done
             
-            return reward + self.turn_penalty
+            return reward
         
         # Reserve card moves
         chosen_move_index -= player.buy_dim
@@ -133,7 +135,7 @@ class Game:
                 board.take_gems(discard_if_gt10)
 
             reward = self.discard_penalty * n_discards
-            return reward + self.turn_penalty
+            return reward
 
     def _check_noble_visit(self, player):
         visited = 0
@@ -144,11 +146,14 @@ class Game:
                 visited += 1
         return visited
     
-    def to_state_vector(self):
-        board_vector = self.board.to_state_vector()  # 157
-        active_player = self.active_player.to_state_vector()  # 46
-        enemy_player = self.players[(self.half_turns+1) % 2].to_state_vector()  # 46
+    def to_state(self):
+        cur_player = self.active_player
+        enemy_player = self.players[(self.half_turns+1) % 2]
 
-        vector = np.concatenate((board_vector, active_player, enemy_player))
-        return vector.astype(np.float32)  # 249
+        board_vector = self.board.to_state(cur_player.effective_gems)  # 157
+        hero_vector = self.active_player.to_state()                    # 47
+        enemy_vector = enemy_player.to_state()                         # 47
+
+        vector = np.concatenate((board_vector, hero_vector, enemy_vector))    # 251
+        return vector.astype(np.float32)
     

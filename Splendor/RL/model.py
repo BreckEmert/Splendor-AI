@@ -25,7 +25,7 @@ class RLAgent:
         self.paths = paths
 
         # Dimensions
-        self.state_dim = 249
+        self.state_dim = 251
         self.action_dim = 140
         self.batch_size = 128
 
@@ -43,10 +43,10 @@ class RLAgent:
         # Epsilon
         self.epsilon = 1.0
         self.epsilon_min = 0.02
-        self.epsilon_decay = 0.9995
+        self.epsilon_decay = 0.9998
 
         # Learning rate
-        self.lr = 0.001
+        self.lr = 0.0002
         self.decay_steps = 80_000
         self.decay_rate = 0.1
         self.tau = 0.001
@@ -253,24 +253,25 @@ class RLAgent:
             return
 
         with self.tensorboard.as_default():
-            """Training metrics"""
-            ############################################
+            # Training metrics
+            ###################################################################
             current_lr = self.model.optimizer.learning_rate
             tf.summary.scalar('Training Metrics/learning_rate', current_lr, step=step)
             tf.summary.histogram('Training Metrics/action_hist', actions, step=step)
             tf.summary.scalar('Training Metrics/batch_loss', tf.reduce_mean(loss), step=step)
             tf.summary.scalar('Training Metrics/epsilon', self.epsilon, step=step)
-            tf.summary.scalar('Training Metrics/avg_reward', tf.reduce_mean(rewards), step=step)  # Global average reward
+            tf.summary.scalar('Training Metrics/batch_avg_reward', tf.reduce_mean(rewards), step=step)
 
 
-            """Q-values"""
-            ############################################
+            # Q-values
+            ###################################################################
             folder = "Average Q-Values (normalized by global avg)"
             legal_qs = tf.where(tf.math.is_finite(qs), qs, tf.zeros_like(qs))  # Removes NaN and inf
             avg_q = tf.reduce_mean(legal_qs)
             tf.summary.scalar(f'{folder}/_avg_q', avg_q, step=step)  # Global average q
 
-            """Q-values of take moves"""
+            # Q-values of take moves
+            ###########################
             # qs
             take_3_qs = tf.gather(legal_qs, self.i_take_3, axis=1)
             take_2_qs = tf.gather(legal_qs, self.i_take_2, axis=1)
@@ -284,7 +285,8 @@ class RLAgent:
             tf.summary.scalar(f'{folder}/take_2', take_2_qs, step=step)
             tf.summary.scalar(f'{folder}/take_other', other_takes_qs, step=step)
             
-            """Q-values of buy moves"""
+            # Q-values of buy moves
+            ###########################
             # qs
             buy_tier1_qs = tf.gather(legal_qs, self.i_buy_tier1, axis=1)
             buy_tier2_qs = tf.gather(legal_qs, self.i_buy_tier2, axis=1)
@@ -301,13 +303,15 @@ class RLAgent:
             tf.summary.scalar(f'{folder}/.buy_tier3', buy_tier3_qs, step=step)
             tf.summary.scalar(f'{folder}/_buy_reserved', buy_reserved_qs, step=step)
 
-            """Q-values of reserve moves"""
+            # Q-values of reserve moves
+            ###########################
             # Reserve actions
             reserve_qs = tf.gather(legal_qs, self.i_reserve, axis=1)
             reserve_qs = tf.reduce_mean(reserve_qs) - avg_q
             tf.summary.scalar(f'{folder}/_reserve', reserve_qs, step=step)
 
-            """Q-values of buys by point value"""
+            # Q-values of buys, by point value
+            ###########################
             # Get the action indices of buy moves
             offsets = tf.gather(self.buyIdx_to_pointIdx, actions)
             is_buy = offsets >= 0
@@ -339,12 +343,16 @@ class RLAgent:
                 tf.summary.scalar(f'BuyQ/points_{p}', mean_by_pts[p] - avg_q, step=step)
 
 
-            """Model weights"""
-            ############################################
+            # Model weights
+            ###################################################################
             for layer in self.model.layers:
                 if hasattr(layer, 'kernel') and layer.kernel is not None:
                     weights = layer.kernel
                     tf.summary.histogram('Model Weights/' + layer.name + '_weights', weights, step=step)
+
+    def log_game_lengths(self, avg):
+        with self.tensorboard.as_default():
+            tf.summary.scalar('Training Metrics/game lengths', avg, step=self.step)
 
     def replay(self) -> None:
         """Standard off-policy replay"""

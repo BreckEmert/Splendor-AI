@@ -37,14 +37,12 @@ def ddqn_loop(paths, log_rate=0):
             # Draw the game state
             if logging:
                 draw_game_state(episode, game)
-
+        
         game_lengths.append(game.half_turns)
 
-        # Print avg game length
-        if episode % 100 == 0:
+        if episode % 10 == 0:
             avg = sum(game_lengths)/len(game_lengths)/2
-            print(f"Episode: {episode}")
-            print(f"Average half turns for last 100 games: {avg}")
+            model.log_game_lengths(avg)
             game_lengths = []
 
         # Save the model and memory
@@ -90,7 +88,7 @@ def find_fastest_game(paths, n_games, log_states=False):
         while not completed_quickly:
             for _ in range(2):
                 game.turn()
-                game.state_history.append(game.to_state_vector())
+                game.state_history.append(game.to_state())
             
             # Just because someone won doesn't mean it was a short enough win
             if game.victor:
