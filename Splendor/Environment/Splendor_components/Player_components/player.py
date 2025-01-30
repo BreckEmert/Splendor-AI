@@ -23,6 +23,10 @@ class Player:
         self.points: float = 0.0
         self.victor: bool = False
 
+    @property
+    def effective_gems(self):
+        return self.gems[:5] + self.cards
+
     def _initialize_all_takes(self):
         """Preloads all possible take indices that can 
         be filtered and combined during gameplay.  Avoids 
@@ -240,7 +244,7 @@ class Player:
             for tier_index, tier in enumerate(board.cards):
                 for card in tier:
                     legal_reserve_mask.append(bool(card))
-                remaining_deck = board.deck_mapping[tier_index].cards
+                remaining_deck = board.decks[tier_index].cards
                 legal_reserve_mask.append(bool(remaining_deck))
         else:
             legal_reserve_mask = [False] * 15
@@ -261,16 +265,18 @@ class Player:
         rl_moves = self.model.get_predictions(state, legal_mask)
         return np.argmax(rl_moves)
 
-    def to_state_vector(self):
+    def to_state(self):
         reserved_cards_vector = np.zeros(33)  # 11*3
         for i, card in enumerate(self.reserved_cards):
-            reserved_cards_vector[i*11:(i+1)*11] = card.vector
+            reserved_cards_vector[i*11:(i+1)*11] = card.to_vector(self.effective_gems)
 
         state_vector = np.concatenate((
-            self.gems / 4,          # 6
+            self.gems[:5] / 4,      # 5
+            [self.gems[5] / 5],     # 1
             [self.gems.sum() / 10], # 1
             self.cards / 4,         # 5
+            [self.cards.sum() / 10], # 1
             reserved_cards_vector,  # 33
             [self.points / 15]      # 1
         ))
-        return state_vector  # length 46
+        return state_vector  # length 47
