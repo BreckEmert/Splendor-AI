@@ -39,10 +39,10 @@ class Game:
         self.move_index = move_index
         reward = self.apply_move(move_index)
 
-        # assert np.all(self.board.gems >= 0), "Board gems lt0"
-        # assert np.all(self.board.gems[:5] <= 4), "Board gems gt10"
-        # assert self.active_player.gems.sum() >= 0, "Player gems lt0"
-        # assert self.active_player.gems.sum() <= 10, "Player gems gt10"
+        assert np.all(self.board.gems >= 0), "Board gems lt0"
+        assert np.all(self.board.gems[:5] <= 4), "Board gems gt10"
+        assert self.active_player.gems.sum() >= 0, "Player gems lt0"
+        assert self.active_player.gems.sum() <= 10, "Player gems gt10"
 
         # Remember
         next_state = self.to_state()
@@ -86,7 +86,7 @@ class Game:
 
             # Player spends the tokens
             with_gold = chosen_move_index % 2  # All odd indices are gold spends
-            spent_gems = player._auto_spend(bought_card.cost, with_gold=with_gold)
+            spent_gems = player.auto_spend(bought_card.cost, with_gold=with_gold)
 
             # Board gets them back
             board.return_gems(spent_gems)
@@ -150,10 +150,10 @@ class Game:
         cur_player = self.active_player
         enemy_player = self.players[(self.half_turns+1) % 2]
 
-        board_vector = self.board.to_state(cur_player.effective_gems)  # 157
-        hero_vector = self.active_player.to_state()                    # 47
-        enemy_vector = enemy_player.to_state()                         # 47
+        board_vector = self.board.to_state(cur_player.effective_gems)        # 157
+        hero_vector = self.active_player.to_state()                          # 47
+        enemy_vector = enemy_player.to_state()                               # 47
 
-        vector = np.concatenate((board_vector, hero_vector, enemy_vector))    # 251
+        vector = np.concatenate((board_vector, hero_vector, enemy_vector))   # 251
         return vector.astype(np.float32)
     
