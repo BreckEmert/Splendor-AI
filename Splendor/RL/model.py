@@ -1,6 +1,8 @@
 # Splendor/RL/model.py
 
 import os
+os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'  # Stop NUMA warnings
+
 import pickle
 from collections import deque
 from copy import deepcopy
@@ -14,7 +16,6 @@ from keras.losses import mean_squared_error, Huber
 from keras.models import load_model
 from keras.initializers import GlorotNormal, HeNormal
 from keras.optimizers import Adam
-from keras.optimizers.schedules import ExponentialDecay
 from keras.regularizers import l2
 
 
@@ -27,11 +28,11 @@ class RLAgent:
         # Dimensions
         self.state_dim = 251
         self.action_dim = 140
-        self.batch_size = 128
+        self.batch_size = 512
 
         # Initial memory, note batch size/replay_freq is samples per memory
         #  10k/50 = 200 games but memories are correlated as both current and enemy player are stored
-        self.replay_buffer_size = 10_000
+        self.replay_buffer_size = 50_000
         self.memory = self._load_memory()
 
         # Huber loss
@@ -43,12 +44,16 @@ class RLAgent:
         # Epsilon
         self.epsilon = 1.0
         self.epsilon_min = 0.02
-        self.epsilon_decay = 0.9998
+        self.epsilon_decay = 0.99995
 
         # Learning rate
-        self.lr = 0.0002
-        self.decay_steps = 80_000
-        self.decay_rate = 0.1
+        lr_schedule = ScheduleWithWarmup(
+            warmup_init_lr = 1e-5, 
+            decay_init_lr = 2e-4, 
+            warmup_steps = 10_000, 
+            decay_steps = 70_000, 
+            decay_rate = 0.1
+        )
         self.tau = 0.001
 
         model_from_path = paths['model_from_path']
@@ -57,10 +62,9 @@ class RLAgent:
             self.model = load_model(model_from_path)
             self.target_model = load_model(model_from_path)
         else:
-            print("Building a new model")
-            self.model = self._build_model(paths['layer_sizes'])
+            self.model = self._build_model(lr_schedule)
             self.model._name = "policy_model"
-            self.target_model = self._build_model(paths['layer_sizes'])
+            self.target_model = self._build_model(lr_schedule)
             self.target_model._name = "target_model"
             self.target_model.set_weights(self.model.get_weights())
 
@@ -113,25 +117,28 @@ class RLAgent:
 
         self.buyIdx_to_pointIdx = tf.constant(action_offsets, dtype=tf.int32)
 
-    def _build_model(self, layer_sizes):
+    def _build_model(self, lr_schedule):
         """Builds a nn for both policy and target network."""
+        layer_sizes = self.paths['layer_sizes']
+        print("Building a new model with layer sizes", layer_sizes)
+        
         # Input
         state_input = Input(shape=(self.state_dim, ))
 
         # Layer 1
         dense1 = Dense(layer_sizes[0], kernel_initializer=HeNormal(), 
                        name='dense1')(state_input)  # Can do # l2(0.001)
-        dense1 = LeakyReLU(alpha=0.3)(dense1)
+        dense1 = LeakyReLU(negative_slope=0.3)(dense1)
 
         # Layer 2
         dense2 = Dense(layer_sizes[1], kernel_initializer=HeNormal(), 
                        name='dense2')(dense1)
-        dense2 = LeakyReLU(alpha=0.3)(dense2)
+        dense2 = LeakyReLU(negative_slope=0.3)(dense2)
 
         # # Layer 3
         # dense3 = Dense(layer_sizes[1], kernel_initializer=HeNormal(), 
         #                name='dense3')(dense2)
-        # dense3 = LeakyReLU(alpha=0.3)(dense3)
+        # dense3 = LeakyReLU(negative_slope=0.3)(dense3)
 
         # Action layer
         action = Dense(self.action_dim, activation='linear', 
@@ -142,10 +149,6 @@ class RLAgent:
         model = tf.keras.Model(inputs=state_input, outputs=action)
 
         # Optimizer
-        lr_schedule = ExponentialDecay(self.lr, 
-                                       decay_steps = self.decay_steps, 
-                                       decay_rate = self.decay_rate, 
-                                       staircase = False)
         optimizer = Adam(learning_rate=lr_schedule, clipnorm=1.0)
 
         # Compile and return
@@ -189,10 +192,15 @@ class RLAgent:
         print(f"Wrote {len(memory)} memories to {memory_path}")
 
     def _update_target_model(self) -> None:
-        """Could be done with tf_agents.utils.common.soft_variables_update"""
-        weights = zip(self.target_model.trainable_weights, self.model.trainable_weights)
-        for target_weights, policy_weights in weights:
-            target_weights.assign(self.tau*policy_weights + (1-self.tau)*target_weights)
+        """Keeps the target model lagged behind the policy model"""
+        model_weights = self.model.get_weights()
+        target_weights = self.target_model.get_weights()
+
+        updated_weights = []
+        for mw, tw in zip(model_weights, target_weights):
+            updated_weights.append(self.tau * mw + (1 - self.tau) * tw)
+
+        self.target_model.set_weights(updated_weights)
 
     @tf.function
     def get_predictions(self, state, legal_mask):
@@ -380,3 +388,43 @@ class RLAgent:
     def save_model(self) -> None:
         self.model.save(self.paths['model_save_path'])
         print(f"Saved the model at {self.paths['model_save_path']}")
+
+
+class ScheduleWithWarmup(tf.keras.optimizers.schedules.LearningRateSchedule):
+    def __init__(self, warmup_init_lr, decay_init_lr, 
+                 warmup_steps, decay_steps, decay_rate):
+        super().__init__()
+        self.warmup_init_lr = tf.cast(warmup_init_lr, tf.float32)
+        self.decay_init_lr = tf.cast(decay_init_lr, tf.float32)
+        self.warmup_slope = self.decay_init_lr - self.warmup_init_lr
+
+        self.warmup_steps = tf.cast(warmup_steps, tf.float32)
+        self.decay_steps = tf.cast(decay_steps, tf.float32)
+        self.decay_rate = tf.cast(decay_rate, tf.float32)
+
+    def __call__(self, step):
+        step_float = tf.cast(step, tf.float32)
+
+        # During warmup, linear increase
+        warmup_progress = step_float / self.warmup_steps
+        warmup_lr = self.warmup_init_lr + self.warmup_slope * warmup_progress
+
+        # After warmup, exponential decay
+        decay_step = step_float - self.warmup_steps
+        decay_factor = tf.pow(self.decay_rate, decay_step / self.decay_steps)
+        decayed_lr = self.decay_init_lr * decay_factor
+
+        # Return based on self.step
+        return tf.cond(step_float < self.warmup_steps,
+                       lambda: warmup_lr,
+                       lambda: decayed_lr)
+
+    def get_config(self):
+        return {
+            "initial_lr": float(self.warmup_init_lr.numpy()),
+            "decay_start_lr": float(self.decay_init_lr.numpy()),
+            "warmup_steps": float(self.warmup_steps.numpy()),
+            "decay_steps": float(self.decay_steps.numpy()),
+            "decay_rate": float(self.decay_rate.numpy())
+        }
+    

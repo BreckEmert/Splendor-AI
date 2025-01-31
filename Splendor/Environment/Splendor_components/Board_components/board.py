@@ -30,12 +30,16 @@ class Board:
         ]
 
         self.nobles = [self.noble.draw() for _ in range(3)]
-                
+
+    @property
+    def state_vector(self):
+        return self._state_vector
+
     def take_gems(self, taken_gems): 
-        self.gems -= np.pad(taken_gems, (0, 6-len(taken_gems)))
+        self.gems -= taken_gems
 
     def return_gems(self, returned_gems):
-        self.gems += np.pad(returned_gems, (0, 6-len(returned_gems)))
+        self.gems += returned_gems
 
     def take_card(self, tier, position):
         card = self.cards[tier][position]
@@ -53,6 +57,7 @@ class Board:
         
         # Replace card
         card = self.take_card(tier, position)
+
         return card, gold
     
     def reserve_from_deck(self, tier):
@@ -63,32 +68,32 @@ class Board:
         
         # Remove card
         card = self.decks[tier].draw()
+
         return card, gold
         
     def to_state(self, effective_gems):
-        # All shop cards, size 3*4*11 = 132
-        i = 0
-        tier_vector = np.zeros(132, dtype=float)
+        state_vector = np.zeros(157, dtype=np.float32)
+
+        # Gems (6+1 = 7)
+        state_vector[:6] = self.gems / 4.0
+        state_vector[5] /= 1.25  # Normalize to 5
+        state_vector[6] = self.gems.sum() / 10.0
+
+        # Shop cards (3*4*11 = 132)
+        start = 7
         for tier in self.cards:  # 3 tiers
             for card in tier:    # 4 cards per tier
                 if card:         # reward1hot, points, cost1hot = 11
-                    tier_vector[i:i+11] = card.to_vector(effective_gems)
-                i += 11
+                    card_vector = card.to_vector(effective_gems)
+                    state_vector[start:start+11] = card_vector
+                start += 11
 
-        # All nobles, size 3*6 = 18
-        i = 0
-        nobles_vector = np.zeros(18, dtype=float)
+        # Nobles (3*6 = 18)
+        start = 139
         for card in self.nobles:
             if card:
-                nobles_vector[i:i+6] = card.to_vector(effective_gems)
-            i += 6
+                card_vector = card.to_vector(effective_gems)
+                state_vector[start:start+6] = card_vector
+            start += 6
 
-        # Final state vector for the board
-        state_vector = np.concatenate((
-            self.gems[:5] / 4,      # 5
-            [self.gems[5] / 5],     # 1
-            [self.gems.sum() / 10], # 1
-            tier_vector,            # 132
-            nobles_vector           # 18
-        ))
         return state_vector  # 157
