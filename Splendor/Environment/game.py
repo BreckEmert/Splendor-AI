@@ -40,7 +40,7 @@ class Game:
         reward = self.apply_move(move_index)
 
         assert np.all(self.board.gems >= 0), "Board gems lt0"
-        assert np.all(self.board.gems[:5] <= 4), "Board gems gt10"
+        assert np.all(self.board.gems[:5] <= 4), "Board gems gt4"
         assert self.active_player.gems.sum() >= 0, "Player gems lt0"
         assert self.active_player.gems.sum() <= 10, "Player gems gt10"
 
