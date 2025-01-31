@@ -72,6 +72,9 @@ class Board:
         return card, gold
         
     def to_state(self, effective_gems):
+        """Some overwriting occurs because of the 6-dim
+        vector standardization, so not all [5] have meaning.
+        """
         state_vector = np.zeros(157, dtype=np.float32)
 
         # Gems (6+1 = 7)

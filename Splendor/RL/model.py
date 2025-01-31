@@ -30,21 +30,19 @@ class RLAgent:
         self.action_dim = 140
         self.batch_size = 512
 
+        # Huber loss
+        # self.huber = Huber()
+
+        # DQN
+        self.gamma = 0.98  # 0.1**(1/25)
+        self.epsilon = 1.0
+        self.epsilon_min = 0.02
+        self.epsilon_decay = 0.99995
+
         # Initial memory, note batch size/replay_freq is samples per memory
         #  10k/50 = 200 games but memories are correlated as both current and enemy player are stored
         self.replay_buffer_size = 50_000
         self.memory = self._load_memory()
-
-        # Huber loss
-        # self.huber = Huber()
-
-        # Gamma
-        self.gamma = 0.98  # 0.1**(1/25)
-
-        # Epsilon
-        self.epsilon = 1.0
-        self.epsilon_min = 0.02
-        self.epsilon_decay = 0.99995
 
         # Learning rate
         lr_schedule = ScheduleWithWarmup(
@@ -56,6 +54,7 @@ class RLAgent:
         )
         self.tau = 0.001
 
+        # Model
         model_from_path = paths['model_from_path']
         if model_from_path:
             print("Loading previous model")
@@ -257,8 +256,8 @@ class RLAgent:
         step = self.step
 
         # Log every n steps
-        if step % 200:
-            return
+        # if step % 20:
+        #     return
 
         with self.tensorboard.as_default():
             # Training metrics
@@ -357,6 +356,8 @@ class RLAgent:
                 if hasattr(layer, 'kernel') and layer.kernel is not None:
                     weights = layer.kernel
                     tf.summary.histogram('Model Weights/' + layer.name + '_weights', weights, step=step)
+
+        self.tensorboard.flush()
 
     def log_game_lengths(self, avg):
         with self.tensorboard.as_default():

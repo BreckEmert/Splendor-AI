@@ -17,6 +17,7 @@ class Player:
         self.gems: np.ndarray = np.zeros(6, dtype=int)  # Gold gem so 6
         # self.cards: np.ndarray = np.zeros(6, dtype=int)  # 5th dim unused
         self.cards = np.full(6, 1, dtype=int)  # DELETE THIS LATER, UNCOMMENT CHECK NOBLES
+        self.cards[5] = 0  # DELETE THIS LATER
         self.reserved_cards: list = []
 
         self.card_ids: list = [[] for _ in range(5)]
@@ -92,22 +93,20 @@ class Player:
         """For now, random spend logic.  Modifies player gems 
         IN PLACE.  Also ENSURE that this and other methods 
         recieve .copy() objects, as this does modify card_cost.
+        raw_cost is guaranteed to be affordable, so doing
+        spent_gems[5] = card_cost.sum() is completely fine.
         """
-        spent_gems = np.zeros(6, dtype=int)
-
         # Discount the cost with our purchased cards
         card_cost = np.maximum(raw_cost - self.cards, 0)
 
-        # IMPLEMENT A HOG MOVE?  Often we don't want to relenquish colors.
-        # Pay with regular gems
+        # Pay what we can with regular gems
         spent_gems = np.minimum(self.gems, card_cost)
-        card_cost -= spent_gems
 
         # Pay the rest with gold
         if with_gold:
-            spent_gems[5] = card_cost.sum()
+            spent_gems[5] = card_cost.sum() - spent_gems.sum()
 
-        # Subtract the spent gems
+        # Return spent_gems so the board can update as well
         self.gems -= spent_gems
         return spent_gems
 
@@ -116,6 +115,11 @@ class Player:
         discards by trying to discard gems that weren't taken.
         This avoids combinatorial discard space does not 
         significantly limit gameplay.
+        """
+        """Ideally would have logic to competetively discard, 
+        (sometimes I have wanted to discard gold so that the
+        gems are frozen for the enemy player) but for now that 
+        is out of the learning scope.
         """
         # Check if this is a reserve reward (gold only)
         gold_only = gems_to_take[5] > 0
@@ -262,6 +266,9 @@ class Player:
         return np.argmax(rl_moves)
 
     def to_state(self):
+        """Some overwriting occurs because of the 6-dim
+        vector standardization, so not all [5] have meaning.
+        """
         state_vector = np.zeros(47, dtype=np.float32)
 
         # Gems (6+1 = 7)
