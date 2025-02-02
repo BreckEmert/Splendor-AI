@@ -56,6 +56,8 @@ def main():
     memory_buffer = 'memory.pkl'  # 'memory.pkl' 'random_memory.pkl'
     paths = get_paths(layer_sizes, model_from_name, memory_buffer)
     print(paths)
+    print(os.listdir(os.path.dirname(paths['tensorboard_dir'])))
+    return
 
     # Function calls
     ddqn_loop(paths, log_rate=0)
@@ -63,13 +65,13 @@ def main():
     # find_fastest_game(paths, n_games=2, log_states=False)
         # !Uncomment line 205 in player.py!
 
- 
+
 if __name__ == "__main__":
     """If you're ever having issues make sure everything you pull from 
     the game is immutable - using .copy() and copy.deepcopy() where needed.
     """
-    main()  
-    
+    main()
+
     # Currently bad changes that OBSTRUCT normal play:
         # player.cards is set to 1
         # Not bad, but note that player.gems is subtracted from card.cost

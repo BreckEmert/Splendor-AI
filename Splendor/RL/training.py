@@ -16,11 +16,11 @@ def ddqn_loop(paths, log_rate=0):
     players = [('Player1', model), ('Player2', model)]
     game = Game(players, model)
     game_lengths = []
+    step_counter = 0
 
     # Loop through games - safe to stop at any time
     for episode in range(8000):
         game.reset()
-        step_counter = 0
       
         # Enable logging
         logging = (log_rate and episode%log_rate == 0)

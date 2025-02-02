@@ -96,20 +96,18 @@ class Player:
         raw_cost is guaranteed to be affordable, so doing
         spent_gems[5] = card_cost.sum() is completely fine.
         """
-        spent_gems = np.zeros(6, dtype=int)
-
         # Discount the cost with our purchased cards
         card_cost = np.maximum(raw_cost - self.cards, 0)
 
-        # Pay with regular gems
+        # Pay what we can with regular gems
         spent_gems = np.minimum(self.gems, card_cost)
-        self.gems -= spent_gems
-        card_cost -= spent_gems
 
         # Pay the rest with gold
         if with_gold:
-            spent_gems[5] = card_cost.sum()
+            spent_gems[5] = card_cost.sum() - spent_gems.sum()
 
+        # Return spent_gems so the board can update as well
+        self.gems -= spent_gems
         return spent_gems
 
     def auto_take(self, gems_to_take):
