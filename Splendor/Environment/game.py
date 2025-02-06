@@ -13,8 +13,8 @@ class Game:
         self.model = model
         self.reset()
         
-        self.discard_penalty: float = -0.05  # < 25 moves / 15 gems / 3 gems
-        self.final_reward: float = 5.0
+        self.discard_penalty: float = -0.5  # < 25 moves / 15 gems / 3 gems
+        self.final_reward: float = 3.0
 
     def reset(self):
         self.board = Board()
@@ -39,10 +39,11 @@ class Game:
         self.move_index = move_index
         reward = self.apply_move(move_index)
 
-        assert np.all(self.board.gems >= 0), "Board gems lt0"
-        assert np.all(self.board.gems[:5] <= 4), "Board gems gt4"
-        assert self.active_player.gems.sum() >= 0, "Player gems lt0"
-        assert self.active_player.gems.sum() <= 10, "Player gems gt10"
+        # Asserts to use after changing game logic
+        # assert np.all(self.board.gems >= 0), "Board gems lt0"
+        # assert np.all(self.board.gems[:5] <= 4), "Board gems gt4"
+        # assert self.active_player.gems.sum() >= 0, "Player gems lt0"
+        # assert self.active_player.gems.sum() <= 10, "Player gems gt10"
 
         # Remember
         next_state = self.to_state()
@@ -65,8 +66,15 @@ class Game:
                 gems_to_take = player.all_takes_2_same[(chosen_move_index-40) // 3]
             elif chosen_move_index < 85: # all_takes_2_diff; 10 * 3discards
                 gems_to_take = player.all_takes_2_diff[(chosen_move_index-55) // 3]
-            else: # chosen_move_index < 95  # all_takes_1; 5 * 2discards
+            elif chosen_move_index < 95:  # all_takes_1; 5 * 2discards
                 gems_to_take = player.all_takes_1[(chosen_move_index-85) // 2]
+            else:  # All else is illegal, discard
+                # print(player.gems, player.gems.sum())
+                legal_discards = np.where(player.gems > 0)[0]
+                discard_idx = np.random.choice(legal_discards)
+                player.gems[discard_idx] -= 1
+                board.gems[discard_idx] += 1
+                return self.discard_penalty
 
             taken_gems, n_discards = player.auto_take(gems_to_take)
             board.take_gems(taken_gems)
@@ -110,7 +118,7 @@ class Game:
                 """Yes, I am 100% positive that this [-1] indexing works fine.
                 # Notice that this is apply_move(), which gets ran BEFORE
                 # remember() does, so this is still the loser's memory."""
-                self.model.memory[-1][2] -= self.final_reward  # Loser reward
+                self.model.memory[-1][2] -= self.final_reward/2  # Loser reward
                 self.model.memory[-1][5] = True  # Mark loser's memory as done
             
             return reward

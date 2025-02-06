@@ -12,7 +12,7 @@ def get_unique_filename(layer_sizes):
     timestamp = timestamp.strftime("%m-%d-%H-%M")  # mm/dd/hh/mm
     return f"{timestamp}__{nickname}"
 
-def get_paths(layer_sizes, model_from_name, memory_buffer_name):
+def get_paths(layer_sizes, model_from_name, memory_buffer_name, log_rate):
     """I use '_dir' for folders and '_path' for things with extensions.
     Could be a dataclass if I get around to it.
     """
@@ -29,6 +29,8 @@ def get_paths(layer_sizes, model_from_name, memory_buffer_name):
     memory_buffer_path = os.path.join(saved_files_dir, memory_buffer_name) if memory_buffer_name else None
     assert not model_from_path or os.path.exists(model_from_path), f"{model_from_path} doesn't exist."
 
+    images_dir = os.path.join(saved_files_dir, "rendered_games", nickname) if log_rate else None
+
     paths = {
         "base_dir": base_dir, 
         "layer_sizes": layer_sizes,
@@ -37,30 +39,30 @@ def get_paths(layer_sizes, model_from_name, memory_buffer_name):
         "memory_buffer_path": memory_buffer_path, 
         "rl_dir": rl_dir, 
         "saved_files_dir": saved_files_dir, 
-        "images_dir": os.path.join(saved_files_dir, "rendered_games", nickname), 
+        "images_dir": images_dir, 
         "tensorboard_dir": os.path.join(saved_files_dir, "tensorboard_logs", nickname)
     }
 
     # Make all of the directories
     for key, path in paths.items():
-        if key.endswith("_dir") :
-            os.makedirs(path, exist_ok=True)
-        elif key.endswith("_path") and path:
-            os.makedirs(os.path.dirname(path), exist_ok=True)
+        if path:
+            if key.endswith("_dir") :
+                os.makedirs(path, exist_ok=True)
+            elif key.endswith("_path"):
+                os.makedirs(os.path.dirname(path), exist_ok=True)
 
     return paths
 
 def main():
-    layer_sizes = [64, 64]
-    model_from_name = None  # "01-25-22-05__256-256.keras"
+    layer_sizes = [512, 512, 256]
+    model_from_name = "02-05-07-37__512-512-256.keras"  # "01-25-22-05__256-256.keras"
     memory_buffer = 'memory.pkl'  # 'memory.pkl' 'random_memory.pkl'
-    paths = get_paths(layer_sizes, model_from_name, memory_buffer)
+    log_rate = 1
+    paths = get_paths(layer_sizes, model_from_name, memory_buffer, log_rate)
     print(paths)
-    print(os.listdir(os.path.dirname(paths['tensorboard_dir'])))
-    return
 
     # Function calls
-    ddqn_loop(paths, log_rate=0)
+    ddqn_loop(paths, log_rate=log_rate)
     # debug_game(paths, memory_buffer=None)
     # find_fastest_game(paths, n_games=2, log_states=False)
         # !Uncomment line 205 in player.py!
@@ -72,8 +74,10 @@ if __name__ == "__main__":
     """
     main()
 
+    # Removed deepcopy(memory) - if issues spike up that's why?
     # Currently bad changes that OBSTRUCT normal play:
-        # player.cards is set to 1
-        # Not bad, but note that player.gems is subtracted from card.cost
-        # Both of those are just to aide with learning, and ideally removed
-        # Though normalizing card.cost is probably useful always
+        # loser reward is divided by two, as I worry that during random play, 
+        # the model that buys the most 0 point cards ends up winning faster.
+        # it locks onto that policy too quickly?  Yeah, because it will
+        # then have cards, so in the random moves it makes it won't be 
+        # punished.
