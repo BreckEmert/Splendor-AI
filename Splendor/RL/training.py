@@ -15,11 +15,19 @@ def ddqn_loop(paths, log_rate=0):
     model = RLAgent(paths)
     players = [('Player1', model), ('Player2', model)]
     game = Game(players, model)
-    game_lengths = []
+    game_lengths = [30]  # Just to reduce variance
     step_counter = 0
 
+    replay_freq = 120
+    n = model.batch_size / replay_freq
+    print(f"Replays are sampled {n} times on average.")
+    """Need to consider whether because of the self-play correlation
+    of states if my sampling should be reduced.  I definitely think 
+    that I should target something lower than normal because of this.
+    """
+
     # Loop through games - safe to stop at any time
-    for episode in range(8000):
+    for episode in range(100_001):
         game.reset()
       
         # Enable logging
@@ -31,7 +39,7 @@ def ddqn_loop(paths, log_rate=0):
             step_counter += 1
             
             # Run replay (roughly 512 batch size / 4 samples = 120 rate)
-            if step_counter%120 == 0:
+            if step_counter%replay_freq == 0:
                 model.replay()
 
             # Draw the game state
@@ -40,14 +48,13 @@ def ddqn_loop(paths, log_rate=0):
         
         # End-of-game logging and saving
         game_lengths.append(game.half_turns)
-
-        if episode % 10 == 0:
+        if episode % 100 == 0:
             avg = sum(game_lengths)/len(game_lengths)/2
             model.log_game_lengths(avg)
             game_lengths = []
 
             # Save the model and memory
-            if episode % 1000 == 0:
+            if episode % 10_000 == 0:
                 model.save_model()
                 model.write_memory()
     

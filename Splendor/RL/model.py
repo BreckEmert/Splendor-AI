@@ -5,7 +5,6 @@ os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'  # Stop NUMA warnings
 
 import pickle
 from collections import deque
-from copy import deepcopy
 from random import sample
 import numpy as np
 
@@ -27,32 +26,32 @@ class RLAgent:
 
         # Dimensions
         self.state_dim = 251
-        self.action_dim = 140
+        self.action_dim = 141
         self.batch_size = 512
 
         # Huber loss
-        # self.huber = Huber()
+        self.huber = Huber()
 
         # DQN
-        self.gamma = 0.98  # 0.1**(1/25)
-        self.epsilon = 1.0
+        self.gamma = 0.99  # 0.1**(1/25)
+        self.epsilon = 0.02
         self.epsilon_min = 0.02
-        self.epsilon_decay = 0.99995
+        self.epsilon_decay = 0.9998
 
         # Initial memory, note batch size/replay_freq is samples per memory
-        #  10k/50 = 200 games but memories are correlated as both current and enemy player are stored
+        # 10k/50 = 200 games but memories are correlated as both current and enemy player are stored
         self.replay_buffer_size = 50_000
         self.memory = self._load_memory()
 
         # Learning rate
         lr_schedule = ScheduleWithWarmup(
             warmup_init_lr = 1e-5, 
-            decay_init_lr = 2e-4, 
-            warmup_steps = 10_000, 
-            decay_steps = 70_000, 
-            decay_rate = 0.1
+            decay_init_lr = 1e-4, 
+            warmup_steps = 3_000, 
+            decay_steps = 100_000, 
+            decay_rate = 0.2
         )
-        self.tau = 0.001
+        self.tau = 0.006
 
         # Model
         model_from_path = paths['model_from_path']
@@ -124,25 +123,17 @@ class RLAgent:
         # Input
         state_input = Input(shape=(self.state_dim, ))
 
-        # Layer 1
-        dense1 = Dense(layer_sizes[0], kernel_initializer=HeNormal(), 
-                       name='dense1')(state_input)  # Can do # l2(0.001)
-        dense1 = LeakyReLU(negative_slope=0.3)(dense1)
-
-        # Layer 2
-        dense2 = Dense(layer_sizes[1], kernel_initializer=HeNormal(), 
-                       name='dense2')(dense1)
-        dense2 = LeakyReLU(negative_slope=0.3)(dense2)
-
-        # # Layer 3
-        # dense3 = Dense(layer_sizes[1], kernel_initializer=HeNormal(), 
-        #                name='dense3')(dense2)
-        # dense3 = LeakyReLU(negative_slope=0.3)(dense3)
+        # Dense layers
+        x = state_input
+        for i, layer_size in enumerate(self.paths['layer_sizes']):
+            x = Dense(layer_size, kernel_initializer=HeNormal(), 
+                      name=f'dense{i+1}')(x)
+            x = LeakyReLU(negative_slope=0.3)(x)
 
         # Action layer
         action = Dense(self.action_dim, activation='linear', 
                        kernel_initializer=HeNormal(),  #, kernel_regularizer=l2(0.015)
-                       name='action')(dense2)
+                       name='action')(x)
 
         # Final model
         model = tf.keras.Model(inputs=state_input, outputs=action)
@@ -214,7 +205,7 @@ class RLAgent:
         return tf.where(legal_mask, qs, tf.fill(qs.shape, -tf.float32.max))
 
     def remember(self, memory) -> None:
-        self.memory.append(deepcopy(memory))
+        self.memory.append(memory)
 
     @tf.function
     def _batch_train(self, states, actions, rewards, next_states, legal_masks, dones) -> None:
@@ -241,7 +232,7 @@ class RLAgent:
         with tf.GradientTape() as tape:
             predictions = self.model(states, training=True)
             # loss = self.huber(target_qs, predictions)
-            loss = mean_squared_error(target_qs, predictions)
+            loss = self.huber(target_qs, predictions)
         gradients = tape.gradient(loss, self.model.trainable_variables)
         self.model.optimizer.apply_gradients(zip(gradients, self.model.trainable_variables))
 
@@ -256,8 +247,8 @@ class RLAgent:
         step = self.step
 
         # Log every n steps
-        # if step % 20:
-        #     return
+        if step % 100:
+            return
 
         with self.tensorboard.as_default():
             # Training metrics
@@ -422,10 +413,9 @@ class ScheduleWithWarmup(tf.keras.optimizers.schedules.LearningRateSchedule):
 
     def get_config(self):
         return {
-            "initial_lr": float(self.warmup_init_lr.numpy()),
-            "decay_start_lr": float(self.decay_init_lr.numpy()),
+            "warmup_init_lr": float(self.warmup_init_lr.numpy()),
+            "decay_init_lr": float(self.decay_init_lr.numpy()),
             "warmup_steps": float(self.warmup_steps.numpy()),
             "decay_steps": float(self.decay_steps.numpy()),
             "decay_rate": float(self.decay_rate.numpy())
         }
-    

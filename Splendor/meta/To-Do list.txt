@@ -1,4 +1,6 @@
 Making learning easier ideas:
+- comment in run.py.  Model is learning to play when moves are random.
+- Make dones 1 instead of True because they're numbers in the end anyway?
 - We should try modifying the board gem limit, as well, and the player gem limit.
     Board limit has been modified
     Implementing infinite player gems right now
