@@ -15,9 +15,9 @@ class Player:
     
     def reset(self):
         self.gems: np.ndarray = np.zeros(6, dtype=int)  # Gold gem so 6
-        # self.cards: np.ndarray = np.zeros(6, dtype=int)  # 5th dim unused
-        self.cards = np.full(6, 1, dtype=int)  # DELETE THIS LATER, UNCOMMENT CHECK NOBLES
-        self.cards[5] = 0  # DELETE THIS LATER
+        self.cards: np.ndarray = np.zeros(6, dtype=int)  # 5th dim unused
+        # self.cards = np.full(6, 1, dtype=int)  # DELETE THIS LATER, UNCOMMENT CHECK NOBLES
+        # self.cards[5] = 0  # DELETE THIS LATER
         self.reserved_cards: list = []
 
         self.card_ids: list = [[] for _ in range(5)]
@@ -63,7 +63,8 @@ class Player:
             len(self.all_takes_3) * 4 +       # 10 * 4
             len(self.all_takes_2_same) * 3 +  # 5 * 3
             len(self.all_takes_2_diff) * 3 +  # 10 * 3
-            len(self.all_takes_1) * 2         # 5 * 2
+            len(self.all_takes_1) * 2 +       # 5 * 2
+            1                                 # discard
         )
 
         self.buy_dim = (
@@ -113,10 +114,10 @@ class Player:
     def auto_take(self, gems_to_take):
         """Add gems_to_take to self.gems, while accounting for 
         discards by trying to discard gems that weren't taken.
-        This avoids combinatorial discard space does not 
+        This avoids combinatorial discard space and does not 
         significantly limit gameplay.
-        """
-        """Ideally would have logic to competetively discard, 
+        
+        Ideally would have logic to competetively discard, 
         (sometimes I have wanted to discard gold so that the
         gems are frozen for the enemy player) but for now that 
         is out of the learning scope.
@@ -159,7 +160,7 @@ class Player:
         discards.  Because these are automatically discarded
         there is no combinatorics needed.
         """
-        legal_take_mask = np.zeros(95, dtype=bool)
+        legal_take_mask = np.zeros(96, dtype=bool)
 
         """TAKE 3"""
         n_discards = max(0, -7+self.gems.sum())
@@ -184,7 +185,10 @@ class Player:
             if np.all(board_gems >= combo):
                 legal_take_mask[85 + 2*index + n_discards] = True
 
-        """Complete list of legal takes"""
+        """Backup discard"""
+        if self.gems.sum() == 10:
+            legal_take_mask[-1] = True
+
         return legal_take_mask
 
     def _get_legal_buys(self, board_cards):
@@ -256,9 +260,11 @@ class Player:
         legal_buy_mask = self._get_legal_buys(board.cards)
         legal_reserve_mask = self._get_legal_reserves(board)
         
-        return np.concatenate(
+        legal_mask = np.concatenate(
             [legal_take_mask, legal_buy_mask, legal_reserve_mask]
         )
+
+        return legal_mask
 
     def choose_move(self, board, state):
         legal_mask = self.get_legal_moves(board)

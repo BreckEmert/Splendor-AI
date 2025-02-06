@@ -12,22 +12,24 @@ take_3_indices = list(it.combinations(range(5), 3))
 take_2_diff_indices = list(it.combinations(range(5), 2))
 
 # Convert a move index into text
-def move_to_text(move_index):
-    if move_index < 95:
+def move_to_text(move_index, player):
+    if move_index < player.take_dim:
         if move_index < 40:
             local_index = move_index
             combo_index = local_index // 4
             discard_idx = local_index % 4
             combo = take_3_indices[combo_index]
             combo_str = ", ".join(gem_types[color] for color in combo)
-            return (f"Take 3 different: {combo_str}" if discard_idx == 0
+            return (f"Take 3 different: {combo_str}"
+                    if discard_idx == 0
                     else f"Take 3: {combo_str} (discard {discard_idx})")
         elif move_index < 55:
             local_index = move_index - 40
             gem_index = local_index // 3
             discard_idx = local_index % 3
             color = gem_types[gem_index]
-            return (f"Take 2 same: {color}" if discard_idx == 0
+            return (f"Take 2 same: {color}"
+                    if discard_idx == 0
                     else f"Take 2: {color} (discard {discard_idx})")
         elif move_index < 85:
             local_index = move_index - 55
@@ -35,36 +37,46 @@ def move_to_text(move_index):
             discard_idx = local_index % 3
             combo = take_2_diff_indices[combo_index]
             combo_str = " & ".join(gem_types[color] for color in combo)
-            return (f"Take 2 different: {combo_str}" if discard_idx == 0
+            return (f"Take 2 different: {combo_str}"
+                    if discard_idx == 0
                     else f"Take 2: {combo_str} (discard {discard_idx})")
         else:
             local_index = move_index - 85
             gem_index = local_index // 2
             discard_idx = local_index % 2
             color = gem_types[gem_index]
-            return (f"Take 1 {color}" if discard_idx == 0
+            return (f"Take 1 {color}"
+                    if discard_idx == 0
                     else f"Take 1 {color} (discard {discard_idx})")
-    elif move_index < 125:
-        buy_index = move_index - 95
-        if buy_index < 24:
-            board_card_idx = buy_index // 2
-            with_gold_flag = buy_index % 2
+        
+    # Buy moves
+    move_index -= player.take_dim
+    if move_index < player.buy_dim:
+        if move_index < 24:
+            board_card_idx = move_index // 2
+            with_gold_flag = move_index % 2
             tier = board_card_idx // 4
             position = board_card_idx % 4
             txt = f"Buy tier {tier+1}, pos {position+1}"
             return txt if with_gold_flag == 0 else txt + " [gold]"
         else:
-            reserved_idx = (buy_index - 24) // 2
-            with_gold_flag = (buy_index - 24) % 2
+            reserved_idx = (move_index - 24) // 2
+            with_gold_flag = (move_index - 24) % 2
             txt = f"Buy reserved slot {reserved_idx+1}"
             return txt if with_gold_flag == 0 else txt + " [gold]"
-    else:
-        reserve_index = move_index - 125
-        tier = reserve_index // 5
-        card_pos = reserve_index % 5
+        
+    # Reserve moves
+    move_index -= player.buy_dim
+    if move_index < player.reserve_dim:
+        tier = move_index // 5
+        card_pos = move_index % 5
         return (f"Reserve from tier {tier+1}, pos {card_pos+1}"
                 if card_pos < 4
                 else f"Reserve top card from tier {tier+1}")
+    
+    # Backup discard move if none were legal
+    return "Backup discard move"
+    
 
 # Draw the game
 def render_game_state(game, image_save_path):
@@ -102,7 +114,7 @@ def render_game_state(game, image_save_path):
 
     # Draw board cards
     board_x_offset = board_start_x
-    y_offset += noble_img.height + 50
+    y_offset += 300 + 50  # Noble image height + 50
 
     for i, tier in enumerate(reversed(board.cards)):
         i = 2 - i
@@ -176,7 +188,7 @@ def render_game_state(game, image_save_path):
         
         # Player move (turn count was incremented so we have to do 'not')
         if player is not game.active_player:
-            move_str = move_to_text(game.move_index)
+            move_str = move_to_text(game.move_index, player)
             y_offset = -170 if player is game.players[0] else 1115
             draw.text((p_start_x, p_start_y + y_offset),
                         move_str, fill=(255, 255, 255), font=font)
