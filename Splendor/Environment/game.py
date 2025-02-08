@@ -13,8 +13,8 @@ class Game:
         self.model = model
         self.reset()
         
-        self.discard_penalty: float = -0.5  # < 25 moves / 15 gems / 3 gems
-        self.final_reward: float = 3.0
+        self.discard_penalty: float = -0.1
+        self.final_reward: float = 5.0
 
     def reset(self):
         self.board = Board()
@@ -109,16 +109,13 @@ class Game:
 
             # Capping any points past 15
             original_points = player.points - bought_card.points  # player already got points so need to take them back
-            reward = min(reward, 15 - original_points)  / 2
+            reward = min(reward, 15 - original_points)  / 3  # recieve 5 reward over the whole game
 
             if player.points >= 15:
                 self.victor = True
                 player.victor = True
                 reward += self.final_reward
-                """Yes, I am 100% positive that this [-1] indexing works fine.
-                # Notice that this is apply_move(), which gets ran BEFORE
-                # remember() does, so this is still the loser's memory."""
-                self.model.memory[-1][2] -= self.final_reward/2  # Loser reward
+                self.model.memory[-1][2] -= self.final_reward  # Loser reward
                 self.model.memory[-1][5] = True  # Mark loser's memory as done
             
             return reward
