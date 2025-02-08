@@ -2,4 +2,4 @@
 
 from .model import RLAgent
 from .random_model import RandomAgent
-from .training import ddqn_loop, find_fastest_game
+from .training import ddqn_loop

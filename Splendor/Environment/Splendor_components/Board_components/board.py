@@ -31,10 +31,6 @@ class Board:
 
         self.nobles = [self.noble.draw() for _ in range(3)]
 
-    @property
-    def state_vector(self):
-        return self._state_vector
-
     def take_gems(self, taken_gems): 
         self.gems -= taken_gems
 

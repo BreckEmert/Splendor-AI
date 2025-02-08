@@ -1,1 +1,1 @@
-Splendor/Environment/Splendor_components/Board_components/board.py
+Splendor/Play/gui_pygame.py

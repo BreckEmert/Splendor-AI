@@ -13,9 +13,9 @@ class Game:
         self.model = model
         self.reset()
         
-        self.discard_penalty: float = -0.5  # < 25 moves / 15 gems / 3 gems
-        self.final_reward: float = 3.0
-
+        self.discard_penalty: float = -0.1  # Optional signal
+        self.final_reward: float = 5.0
+    
     def reset(self):
         self.board = Board()
 
@@ -69,7 +69,6 @@ class Game:
             elif chosen_move_index < 95:  # all_takes_1; 5 * 2discards
                 gems_to_take = player.all_takes_1[(chosen_move_index-85) // 2]
             else:  # All else is illegal, discard
-                # print(player.gems, player.gems.sum())
                 legal_discards = np.where(player.gems > 0)[0]
                 discard_idx = np.random.choice(legal_discards)
                 player.gems[discard_idx] -= 1
@@ -109,16 +108,13 @@ class Game:
 
             # Capping any points past 15
             original_points = player.points - bought_card.points  # player already got points so need to take them back
-            reward = min(reward, 15 - original_points)  / 2
+            reward = min(reward, 15 - original_points)  / 3  # recieve 5 reward over the whole game
 
             if player.points >= 15:
                 self.victor = True
                 player.victor = True
                 reward += self.final_reward
-                """Yes, I am 100% positive that this [-1] indexing works fine.
-                # Notice that this is apply_move(), which gets ran BEFORE
-                # remember() does, so this is still the loser's memory."""
-                self.model.memory[-1][2] -= self.final_reward/2  # Loser reward
+                self.model.memory[-1][2] -= self.final_reward  # Loser reward
                 self.model.memory[-1][5] = True  # Mark loser's memory as done
             
             return reward
@@ -164,4 +160,3 @@ class Game:
 
         vector = np.concatenate((board_vector, hero_vector, enemy_vector))   # 251
         return vector.astype(np.float32)
-    
