@@ -4,7 +4,7 @@ Welcome to the Splendor-AI repository! This project allows you to build an RL-ba
 
 ## Overview
 
-- **Reinforcement Learning Approach**: In its current state, it can only learn well in an easier version of the game with more starting resources.
+- **Reinforcement Learning Approach**: Learns to play Splendor at the lower level of skilled human performance.  While skilled human games are expected to end in 25-30 moves, this agent currently plays games averaging 29 moves.  The rendered games show the agent building up resources towards high point:gem ratio cards, blocking opponent goals, and thinking long-term.
 - **Brute Force Approach**: Searches thousands of games per second to help build an initial replay pool with some signal for how to take the right gems to buy cards.
 
 ## Features

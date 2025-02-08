@@ -33,10 +33,13 @@ class RLAgent:
         self.huber = Huber()
 
         # DQN
-        self.gamma = 0.99  # 0.1**(1/25)
-        self.epsilon = 0.02
-        self.epsilon_min = 0.02
-        self.epsilon_decay = 0.9998
+        self.gamma = 0.93
+        self.gamma_max = 0.995
+        self.gamma_accum = 6e-5
+
+        self.epsilon = 0.04
+        self.epsilon_min = 0.005
+        self.epsilon_decay = 0.999_978
 
         # Initial memory, note batch size/replay_freq is samples per memory
         # 10k/50 = 200 games but memories are correlated as both current and enemy player are stored
@@ -49,9 +52,9 @@ class RLAgent:
             decay_init_lr = 1e-4, 
             warmup_steps = 3_000, 
             decay_steps = 100_000, 
-            decay_rate = 0.2
+            decay_rate = 0.3
         )
-        self.tau = 0.006
+        self.tau = 0.002
 
         # Model
         model_from_path = paths['model_from_path']
@@ -231,8 +234,8 @@ class RLAgent:
         # Fit
         with tf.GradientTape() as tape:
             predictions = self.model(states, training=True)
-            # loss = self.huber(target_qs, predictions)
             loss = self.huber(target_qs, predictions)
+            # loss = mean_squared_error(target_qs, predictions)
         gradients = tape.gradient(loss, self.model.trainable_variables)
         self.model.optimizer.apply_gradients(zip(gradients, self.model.trainable_variables))
 
@@ -242,23 +245,18 @@ class RLAgent:
         """Tensorboard logging.  Always active, but you can 
         increase the step between logs.
         """
-        # Log
-        self.step += 1
         step = self.step
-
-        # Log every n steps
-        if step % 100:
-            return
 
         with self.tensorboard.as_default():
             # Training metrics
             ###################################################################
             current_lr = self.model.optimizer.learning_rate
             tf.summary.scalar('Training Metrics/learning_rate', current_lr, step=step)
-            tf.summary.histogram('Training Metrics/action_hist', actions, step=step)
+            tf.summary.scalar('Training Metrics/gamma', self.gamma, step=step)
             tf.summary.scalar('Training Metrics/batch_loss', tf.reduce_mean(loss), step=step)
             tf.summary.scalar('Training Metrics/epsilon', self.epsilon, step=step)
             tf.summary.scalar('Training Metrics/batch_avg_reward', tf.reduce_mean(rewards), step=step)
+            tf.summary.histogram('Training Metrics/action_hist', actions, step=step)
 
 
             # Q-values
@@ -348,7 +346,7 @@ class RLAgent:
                     weights = layer.kernel
                     tf.summary.histogram('Model Weights/' + layer.name + '_weights', weights, step=step)
 
-        self.tensorboard.flush()
+        # self.tensorboard.flush()
 
     def log_game_lengths(self, avg):
         with self.tensorboard.as_default():
@@ -368,12 +366,15 @@ class RLAgent:
 
         # Train and log
         qs, loss = self._batch_train(states, actions, rewards, next_states, legal_masks, dones)
-        self._tensorboard(states, actions, rewards, qs, loss)
         
-        # Decrease exploration
-        if self.epsilon > self.epsilon_min:
-            self.epsilon *= self.epsilon_decay
-            
+        self.step += 1
+        if self.step % 250 == 0:
+            self._tensorboard(states, actions, rewards, qs, loss)
+        
+        # Update DQN parameters
+        self.epsilon -= (self.epsilon - self.epsilon_min) * (1 - self.epsilon_decay)
+        self.gamma += (self.gamma_max - self.gamma) * self.gamma_accum
+        
         # Update target model
         self._update_target_model()
 

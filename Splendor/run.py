@@ -3,7 +3,7 @@
 import os
 from datetime import datetime, timedelta
 
-from RL import ddqn_loop, find_fastest_game
+from RL import ddqn_loop
 
 
 def get_unique_filename(layer_sizes):
@@ -55,17 +55,15 @@ def get_paths(layer_sizes, model_from_name, memory_buffer_name, log_rate):
 
 def main():
     layer_sizes = [512, 512, 256]
-    model_from_name = "02-05-07-37__512-512-256.keras"  # "01-25-22-05__256-256.keras"
+    model_from_name = None  # "01-25-22-05__256-256.keras"
     memory_buffer = 'memory.pkl'  # 'memory.pkl' 'random_memory.pkl'
-    log_rate = 1
+    log_rate = 25_000
     paths = get_paths(layer_sizes, model_from_name, memory_buffer, log_rate)
     print(paths)
 
     # Function calls
     ddqn_loop(paths, log_rate=log_rate)
     # debug_game(paths, memory_buffer=None)
-    # find_fastest_game(paths, n_games=2, log_states=False)
-        # !Uncomment line 205 in player.py!
 
 
 if __name__ == "__main__":

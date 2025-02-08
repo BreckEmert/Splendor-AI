@@ -1,6 +1,5 @@
 # Splendor/Environment/Splendor_components/player.py
 
-# import copy
 import numpy as np
 import itertools as it
 
