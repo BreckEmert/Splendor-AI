@@ -158,11 +158,13 @@ class RLAgent:
             loaded_memory = [mem for mem in flattened_memory]
             print(f"Loading {len(loaded_memory)} memories")
         else:
-            # Should be run with preexisting memory from 
-            # training.find_fastest_game because this memory is bad
+            print("Warning, training will be garbage with random memory.")
             dummy_state = np.zeros(self.state_dim, dtype=np.float32)
             dummy_mask = np.ones(self.action_dim, dtype=bool)
-            loaded_memory = [[dummy_state, 1, 1, dummy_state, dummy_mask, 1]]
+            loaded_memory = [
+                [dummy_state, 1, 1, dummy_state, dummy_mask, 1]
+                for _ in range(self.replay_buffer_size)
+            ]
 
         return deque(loaded_memory, maxlen=self.replay_buffer_size)
     
@@ -242,8 +244,8 @@ class RLAgent:
         return qs, loss
 
     def _tensorboard(self, states, actions, rewards, qs, loss):
-        """Tensorboard logging.  Always active, but you can 
-        increase the step between logs.
+        """Tensorboard logging.  Always active, but 
+        you can increase the step between logs.
         """
         step = self.step
 

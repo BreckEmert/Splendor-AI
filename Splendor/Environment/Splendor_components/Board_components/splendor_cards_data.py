@@ -1,7 +1,7 @@
 # Splendor/Environment/Splendor_components/Board_components/splendor_cards_data.py
 
-# Contains static card and noble data for the Splendor game.
-# Preloaded card data for tiers 0, 1, 2 and Noble
+# NOT CURRENTLY IMPLEMENTED
+# Making this because it's more accessible and faster compared to xlsx
 PRELOADED_CARD_DATA = {
     0: [
         {'id': 1, 'gem': 0, 'points': 0, 'cost': [0, 2, 0, 0, 2]},

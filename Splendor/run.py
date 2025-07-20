@@ -13,8 +13,8 @@ def get_unique_filename(layer_sizes):
     return f"{timestamp}__{nickname}"
 
 def get_paths(layer_sizes, model_from_name, memory_buffer_name, log_rate):
-    """I use '_dir' for folders and '_path' for things with extensions.
-    Could be a dataclass if I get around to it.
+    """I use '_dir' for folders and '_path' for things with 
+    extensions.  Could be a dataclass if I get around to it.
     """
     backup_dir = os.path.dirname(os.path.abspath(__file__))
     base_dir = os.getenv('WORKSPACE_DIR', backup_dir)
@@ -56,7 +56,7 @@ def get_paths(layer_sizes, model_from_name, memory_buffer_name, log_rate):
 def main():
     layer_sizes = [512, 512, 256]
     model_from_name = None  # "01-25-22-05__256-256.keras"
-    memory_buffer = 'memory.pkl'  # 'memory.pkl' 'random_memory.pkl'
+    memory_buffer = None  # None, 'memory.pkl' ?DOESNT EXIST ANHMORE?:'random_memory.pkl'
     log_rate = 25_000
     paths = get_paths(layer_sizes, model_from_name, memory_buffer, log_rate)
     print(paths)
@@ -67,8 +67,9 @@ def main():
 
 
 if __name__ == "__main__":
-    """If you're ever having issues make sure everything you pull from 
-    the game is immutable - using .copy() and copy.deepcopy() where needed.
+    """If you're ever having issues make sure everything 
+    you pull from the game is immutable - using .copy() 
+    and copy.deepcopy() where needed.
     """
     main()
 
