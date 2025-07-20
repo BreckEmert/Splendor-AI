@@ -18,7 +18,8 @@
     "customizations": {
         "vscode": {
             "settings": { 
-                "terminal.integrated.gpuAcceleration": "on"
+                "terminal.integrated.gpuAcceleration": "on",
+                "python.defaultInterpreterPath": "/usr/bin/python3"
             },
             "extensions": [
                 "ms-python.python",

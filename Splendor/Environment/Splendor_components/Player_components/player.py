@@ -55,8 +55,8 @@ class Player:
         self.all_takes_1[np.arange(5), np.arange(5)] = 1
 
     def _initialize_dimensions(self):
-        """Get indices used in other parts of the code 
-        to avoid some hardcoding.
+        """Get indices used in other parts of 
+        the code to avoid some hardcoding.
         """
         self.take_dim = (
             len(self.all_takes_3) * 4 +       # 10 * 4
@@ -82,8 +82,8 @@ class Player:
         self.action_dim = self.take_dim + self.buy_dim + self.reserve_dim
 
     def get_bought_card(self, card):
-        """Handles all buying on the player's end except for 
-        the gems, which is handled by _auto_discard.
+        """Handles all buying on the player's end except
+        for the gems, which is handled by _auto_discard.
         """
         self.cards[card.gem] += 1
         self.points += card.points
@@ -238,7 +238,7 @@ class Player:
         return legal_buy_mask
 
     def _get_legal_reserves(self, board):
-        """This almost exclusively irrelevant to search the board,
+        """This will almost never happen after a bit of training,
         but while the model learns it may actually buy out all of
         the deck, so we have to confirm there are no None.
         """
@@ -271,8 +271,8 @@ class Player:
         return np.argmax(rl_moves)
 
     def to_state(self):
-        """Some overwriting occurs because of the 6-dim
-        vector standardization, so not all [5] have meaning.
+        """Some overwriting occurs because of the 6-dim vector
+        standardization, so note that not all [5] have meaning.
         """
         state_vector = np.zeros(47, dtype=np.float32)
 

@@ -48,7 +48,7 @@ def move_to_text(move_index, player):
             return (f"Take 1 {color}"
                     if discard_idx == 0
                     else f"Take 1 {color} (discard {discard_idx})")
-        
+    
     # Buy moves
     move_index -= player.take_dim
     if move_index < player.buy_dim:
@@ -76,7 +76,7 @@ def move_to_text(move_index, player):
     
     # Backup discard move if none were legal
     return "Backup discard move"
-    
+
 
 # Draw the game
 def render_game_state(game, image_save_path):
