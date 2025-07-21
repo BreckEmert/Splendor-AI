@@ -266,9 +266,16 @@ class Player:
         return legal_mask
 
     def choose_move(self, board, state):
+        """Note: the only point by which human and AI agent differ."""
         legal_mask = self.get_legal_moves(board)
-        rl_moves = self.model.get_predictions(state, legal_mask)
-        return np.argmax(rl_moves)
+
+        if hasattr(self.model, "get_predictions"):
+            # Self-play call, only need the chosen move
+            rl_moves = self.model.get_predictions(state, legal_mask)
+            return np.argmax(rl_moves)
+        else:
+            # Human call, send in the legal mask
+            return self.model.await_move(legal_mask)
 
     def to_state(self):
         """Some overwriting occurs because of the 6-dim vector

@@ -13,9 +13,9 @@ class Game:
         self.model = model
         self.reset()
         
-        self.discard_penalty: float = -0.1
+        self.discard_penalty: float = -0.1  # Optional signal
         self.final_reward: float = 5.0
-
+    
     def reset(self):
         self.board = Board()
 
@@ -69,7 +69,6 @@ class Game:
             elif chosen_move_index < 95:  # all_takes_1; 5 * 2discards
                 gems_to_take = player.all_takes_1[(chosen_move_index-85) // 2]
             else:  # All else is illegal, discard
-                # print(player.gems, player.gems.sum())
                 legal_discards = np.where(player.gems > 0)[0]
                 discard_idx = np.random.choice(legal_discards)
                 player.gems[discard_idx] -= 1
@@ -161,4 +160,3 @@ class Game:
 
         vector = np.concatenate((board_vector, hero_vector, enemy_vector))   # 251
         return vector.astype(np.float32)
-    

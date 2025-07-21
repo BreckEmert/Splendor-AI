@@ -54,9 +54,9 @@ def get_paths(layer_sizes, model_from_name, memory_buffer_name, log_rate):
     return paths
 
 def main():
-    layer_sizes = [512, 512, 256]
+    layer_sizes = [512, 512, 512, 256]
     model_from_name = None  # "01-25-22-05__256-256.keras"
-    memory_buffer = None  # None, 'memory.pkl' ?DOESNT EXIST ANHMORE?:'random_memory.pkl'
+    memory_buffer = 'memory.pkl'  # None, 'memory.pkl' ?DOESNT EXIST ANHMORE?:'random_memory.pkl'
     log_rate = 25_000
     paths = get_paths(layer_sizes, model_from_name, memory_buffer, log_rate)
     print(paths)

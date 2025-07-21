@@ -22,7 +22,7 @@ def ddqn_loop(paths, log_rate=0):
     """
 
     # Loop through games - safe to stop at any time
-    for episode in range(100_001):
+    for episode in range(60_001):
         game.reset()
       
         # Enable logging
@@ -37,7 +37,7 @@ def ddqn_loop(paths, log_rate=0):
             if step_counter%replay_freq == 0:
                 model.replay()
 
-            # Draw the game state
+            # Draw the game state (very rare at my default of 25k)
             if logging:
                 draw_game_state(episode, game)
         
