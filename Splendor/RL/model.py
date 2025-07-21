@@ -42,7 +42,8 @@ class RLAgent:
         self.epsilon_decay = 0.999_978
 
         # Initial memory, note batch size/replay_freq is samples per memory
-        # 10k/50 = 200 games but memories are correlated as both current and enemy player are stored
+        # 10k/50 = 200 games but memories are correlated as both 
+        # current and enemy player are stored
         self.replay_buffer_size = 50_000
         self.memory = self._load_memory()
 

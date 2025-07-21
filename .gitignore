@@ -10,3 +10,4 @@ Splendor/next_states.csv
 /Splendor/RL/saved_files/game_states
 /Splendor/RL/saved_files/tensorboard_logs
 Splendor/meta/To-Do list.txt
+Splendor/RL/saved_files/memory.pkl

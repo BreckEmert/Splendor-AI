@@ -57,8 +57,7 @@ def render_game_state(game, image_save_path) -> Dict[Tuple[int, int, int, int], 
             path = os.path.join(base_path, "nobles", f"{noble.id}.jpg")
             image = Image.open(path)
             canvas.paste(image, (noble_x, noble_y))
-            mark((noble_x, noble_y, noble_x+card_width, noble_y+card_height), noble.move_index)
-        noble_x += card_width + 50
+        noble_x += card_width + 50   # nobles are cosmetic (no click target)
 
     # Board cards
     tier_x = board_x
@@ -71,14 +70,15 @@ def render_game_state(game, image_save_path) -> Dict[Tuple[int, int, int, int], 
         card_x = tier_x + card_width + 50
         for position, card in enumerate(cards):
             if card:
+                # Open a context menu to allow for buy w/wo gold and reserve
                 card_path = os.path.join(base_path, str(tier), f"{card.id}.jpg")
                 card_image = Image.open(card_path)
                 canvas.paste(card_image, (card_x, tier_y))
+                mark(
+                    (card_x, tier_y, card_x+card_width, tier_y+card_height),
+                    ("card", tier, position)
+                )
 
-                board_position = tier * 4 + position
-                for gold in (0, 1):
-                    move_index = game.active_player.take_dim + board_position * 2 + gold
-                    mark((card_x, tier_y, card_x+card_width, tier_y+card_height), move_index)
             card_x += card_width + 10
         tier_y += card_height + 50
 
@@ -90,10 +90,10 @@ def render_game_state(game, image_save_path) -> Dict[Tuple[int, int, int, int], 
         canvas.paste(gem_image, (gem_x-20, gem_y-15), gem_image.split()[3])
         draw.text((gem_x+gem_width+10, gem_y), str(gem_count), fill=(255, 255, 255), font=font)
 
-        base_index = gem_index * 2 + 85
-        for discard in (0, 1):
-            index = base_index + discard
-            mark((gem_x-20, gem_y-15, gem_x+gem_width, gem_y+gem_height), index)
+        # Register this gem as a selectable token, *not* a final move.
+        # We store color id so GUI can build a combo later.
+        mark((gem_x-20, gem_y-15, gem_x+gem_width, gem_y+gem_height),
+             ("gem", gem_index))
         gem_y += gem_height + 40
 
     # Players
