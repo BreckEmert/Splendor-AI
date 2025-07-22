@@ -24,8 +24,14 @@ class HumanAgent:
     # Game engine callback
     def await_move(self, legal_mask) -> int:  # noqa: N802
         """Blocks until GUI pushes a legal index."""
+        # Expose the legal_mask to the GUI thread
+        self.legal_mask = legal_mask.copy()
+
+        # Wait for a move
+        # blocks until click :contentReference[oaicite:3]{index=3}
         while True:
-            # blocks until click :contentReference[oaicite:3]{index=3}:
             move = self._move_queue.get()
             if legal_mask[move]:
                 return move
+            else:
+                raise ValueError("await_move received an illegal move")

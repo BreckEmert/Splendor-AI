@@ -1,207 +1,115 @@
-# Splendor/Play/render/overlay_renderer.py
+# Play/render/overlay_renderer.py
 """
 Renders any object that is not part of the base game
 """
 
 import pygame
-from collections import Counter
-from typing import TYPE_CHECKING
 
-if TYPE_CHECKING:
-    from Play.common_types import GUIMove
-from Play import FocusTarget, ClickMap
-from Play.render import BoardGeometry, Coord, Rect
+from Play.render.board_renderer import card_width, card_height
 
 
 class OverlayRenderer:
-    def __init__(self, window, preview_rewards: bool):
-        """To implement:
-        1) glow around most recently purchased card or taken gems
-        """
-        self.geom = BoardGeometry()
+    def __init__(self, window):
         self.window = window
         self.font = pygame.font.SysFont(None, 32)
         self.small_font = pygame.font.SysFont(None, 28)
-        self.card_font = pygame.font.SysFont(None, 24)
+        # Any other persistent resources (colors, pre-loaded surfaces) can go here
 
-        self.preview_rewards = preview_rewards
-
-    def scale(self) -> tuple[float, float]:
-        """Scale coordinates because the window can resize."""
-        board_w, board_h = self.geom.canvas
-        window_w, window_h = self.window.get_size()
-        return window_w / board_w, window_h / board_h
-    
-    def to_window(self, rect: Rect) -> Rect:
-        scaled_x, scaled_y = self.scale()
-        return rect.scaled(scaled_x, scaled_y)
-
-    def update_window(self, window: pygame.Surface) -> None:
-        self.window = window
-
-    def draw_selection_highlights(
-            self, 
-            clickmap: ClickMap, 
-            focus_target: FocusTarget | None, 
-            picked_gems: list[int],
-            discard_gems: list[int],
-            spent_gems: list[int]
-        ) -> None:
-        """Highlights selections that are queued for a move."""
-        sx, sy = self.scale()
-
-        def outline(rect, color):
-            r_win = rect.scaled(sx, sy).to_pygame()
-            pygame.draw.rect(self.window, color, r_win, 6)
-        
-        def draw_count_tag(rect, n: int):
-            if n <= 1: return
-            r_win = rect.scaled(sx, sy).to_pygame()
-            tag = self.small_font.render(f"x{n}", True, (255, 255, 0))
-            self.window.blit(
-                tag,
-                (r_win.right - tag.get_width() - 4,
-                 r_win.bottom - tag.get_height() - 4)
-            )
-
-        if focus_target:  # Selected a card
-            match focus_target.kind:
-                case "shop":
-                    key = ("board_card", focus_target.tier, focus_target.pos)
-                    for r, payload in clickmap.items():
-                        if payload == key:
-                            outline(r, (255, 255, 0))
-                            break
-                case "deck":
-                    key = ("board_card", focus_target.tier, 4)
-                    for r, payload in clickmap.items():
-                        if payload == key:
-                            outline(r, (255, 255, 0))
-                            break
-                case "reserved":
-                    for r, payload in clickmap.items():
-                        if payload[0] == "reserved_card" and payload[1] == focus_target.reserve_idx:
-                            outline(r, (255, 255, 0))
-                            break
-            
-            # Manual spend mode
-            if sum(spent_gems) > 0:
-                for r, payload in clickmap.items():
-                    gem_type, gem_idx = payload[0], payload[1]
-                    if gem_type == "player_gem" and spent_gems[gem_idx] > 0:
-                        outline(r, (0, 128, 255))
-                        draw_count_tag(r, spent_gems[gem_idx])
-        else:  # Taking gems
-            pick_cnts = Counter(picked_gems)
-            disc_cnts = Counter(discard_gems)
-            for r, payload in clickmap.items():
-                gem_type, gem_idx = payload[0], payload[1]
-                if gem_type == "board_gem" and gem_idx in pick_cnts:
-                    outline(r, (0, 255, 0))
-                    draw_count_tag(r, pick_cnts[gem_idx])
-                elif gem_type == "player_gem":
-                    if gem_idx in disc_cnts:
-                        outline(r, (255, 0, 0))
-
-    def _draw_button(self, rect: Rect, alpha: int, label, font) -> None:
-        """Draws the move Submit/Clear button."""
-        # Scale
-        r_win = self.to_window(rect).to_pygame()
-        x0, y0 = r_win.topleft
-        w, h = r_win.size
-
+    def _draw_button(self, rect, label: str, opacity: int) -> None:
+        """Draws all UI buttons."""
         # Background
-        surface = pygame.Surface((w, h), pygame.SRCALPHA)
-        surface.fill((30, 30, 30, alpha))
-        self.window.blit(surface, (x0, y0))
-
+        w, h = rect[2] - rect[0], rect[3] - rect[1]
+        surf = pygame.Surface((w, h), pygame.SRCALPHA)
+        surf.fill((30, 30, 30, opacity))
+        self.window.blit(surf, rect[:2])
+        
         # Border
-        pygame.draw.rect(self.window, (255, 255, 255), (x0, y0, w, h), 2)
+        pygame.draw.rect(self.window, (255, 255, 255), rect, 2)
 
         # Label
+        font = pygame.font.SysFont(None, 32)
         txt = font.render(label, True, (255, 255, 255))
-        tx = x0 + (w - txt.get_width()) // 2  # center horizontally
-        ty = y0 + (h - txt.get_height()) // 2  # center vertically
-        self.window.blit(txt, (tx, ty))
+        self.window.blit(txt, (rect[0] + 20, rect[1] + 20))
 
-    def draw_card_context_menu(
-            self, 
-            origin: Coord,
-            button_specs: list[tuple[str, "GUIMove"]],
-        ) -> dict:
-        """When the player clicks a card, this paints buttons at the 
-        card's top-right corner and returns {button_rect: move_idx}.
+    def draw_card_context_menu(self, tier: int, pos: int, button_specs) -> dict:
+        """Upon the player clicking on a card, this paints 
+        up to two buttons at the card's top‑right corner 
+        and returns {button_rect: move_index}.
 
         That button will then lock the move in as the current
         selected move until Clear or another card menu is hit.
-        """
-        # Layout
-        g = self.geom
-        card_x, card_y = origin
-        menu_x, menu_y = card_x + g.card.x - g.button.x, card_y
-        btn_w, btn_h = g.button.x, int(g.button.y * .7)
 
-        # Draw
+        Consults _card_to_move to ......
+        """
+        # list[(label, move_idx)] is already legality‑filtered by caller
+        legal_moves = button_specs
+
+        # Layout of the menu
+        button_width, button_height  = 140, 60  # size of each row
+        card_x = 200 + card_width + 50 + pos*(card_width+10)
+        card_y = 680 + (2 - tier)*(card_height + 50)
+
+        menu_x, menu_y = card_x + card_width - button_width, card_y
+
+        # Draw buttons on the menu
         rects = {}
-        for i, (label, move) in enumerate(button_specs):
-            # Box
-            row_offset = int(i * g.button.y * .7)
-            rect = Rect.from_size(menu_x, menu_y+row_offset, btn_w, btn_h)
-            self._draw_button(rect, 200, label, self.card_font)
-            rects[rect] = ("confirm", move)
+        for i, (label, move) in enumerate(legal_moves):
+            r = (menu_x,
+                 menu_y + i*button_height,
+                 menu_x + button_width,
+                 menu_y + (i+1)*button_height)
+            pygame.draw.rect(self.window, (30,30,30), r)
+            pygame.draw.rect(self.window, (255,255,255), r, 2)
+
+            # Render text in that window
+            font = pygame.font.SysFont(None, 28)
+            txt = font.render(label, True, (255,255,255))
+            self.window.blit(txt, (r[0]+8, r[1]+8))
+            rects[r] = ("confirm", move)
         
         return rects
     
     def draw_move_confirm_button(
             self, 
-            move: "GUIMove | None", 
+            move_idx: int | None, 
             confirm_enabled: bool, 
             clear_enabled: bool
         ) -> dict:
         """Draws the top-level Confirm/Clear buttons.
         Update every time self._picked is changed.
         """
-        # Whether to have Confirm and Clear active
-        confirm_opacity = 255 if confirm_enabled else 80
-        clear_opacity = 255 if clear_enabled else 80
+        button_width, button_height = 200, 80
+        base_x, base_y = 1000, 2600  # Under gems row in 5000x3000
 
+        # Whether to have Confirm active
+        if confirm_enabled:
+            confirm_opacity = 255
+        else:
+            move_idx = None
+            confirm_opacity = 80
+
+        # Whether to have Clear active
+        if clear_enabled:
+            clear_opacity = 255
+        else:
+            clear_opacity = 80
+
+        # Always show Clear, show Confirm when available
         button_specs = [
-            ("Confirm", ("confirm", move), confirm_opacity),
+            ("Confirm", ("confirm", move_idx), confirm_opacity),
             ("Clear", ("clear", None), clear_opacity)
         ]
 
-        # Draw buttons
-        g = self.geom
+        # Draw available buttons
         buttons = {}
-        button_x, cur_y = g.confirm_origin
-        for label, payload, opacity in button_specs:
-            rect = Rect.from_size(button_x, cur_y, *g.button)
-            self._draw_button(rect, opacity, label, self.font)
-            cur_y += g.button.y
-
-            # Only has payload when clickable/full opacity
-            if opacity == 255:
-                buttons[rect] = payload
+        for i, (label, payload, opacity) in enumerate(button_specs):
+            rect = (
+                base_x,
+                base_y + i * button_height,
+                base_x + button_width,
+                base_y + (i + 1) * button_height,
+            )
+            self._draw_button(rect, label, opacity)
+            buttons[rect] = payload
 
         return buttons
-
-    def draw_discard_notice(self) -> None:
-        """Small 'Discard required' prompt to the right of the shop gems."""
-        sx, sy = self.scale()
-        x = int((self.geom.gem_origin.x + self.geom.gem.x + 40) * sx)
-        y = int((self.geom.gem_origin.y - 30) * sy)
-        txt = self.small_font.render("Discard required", True, (255, 0, 0))
-        self.window.blit(txt, (x, y))
-
-    def draw_reward_preview(self, lines: list[str]) -> None:
-        """Bottom-left HUD: one line per entry in *lines*."""
-        if not lines:
-            return
-        sx, sy = self.scale()
-        x, y = self.geom.reward_origin
-        x, y = int(x * sx), int(y * sy)
-
-        for txt in lines:
-            surf = self.font.render(txt, True, (255, 255, 0))
-            self.window.blit(surf, (x, y))
-            y += surf.get_height() + 4

@@ -1,6 +1,6 @@
 # Splendor/RL/training.py
 
-from Environment.game import Game
+from Environment.rl_game import RLGame
 from meta.generate_images import draw_game_state
 from RL import RLAgent, RandomAgent
 
@@ -9,7 +9,7 @@ def ddqn_loop(paths, log_rate=0):
     # Initialize players, their models, and a game (these get reset)
     model = RLAgent(paths)
     players = [('Player1', model), ('Player2', model)]
-    game = Game(players, model)
+    game = RLGame(players, model)
     game_lengths = []
     step_counter = 0
 
