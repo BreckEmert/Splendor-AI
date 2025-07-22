@@ -1,6 +1,6 @@
-# Splendor/Play/play.py
+# Splendor/play.py
 """
-python -m Splendor.Play.play /path/to/trained_model.keras
+python -m Splendor.play /path/to/trained_model.keras
 Small shim that delegates to gui_pygame.play_one_game().
 """
 

@@ -193,7 +193,7 @@ class Player:
     def _get_legal_buys(self, board_cards):
         # Treat purchased cards as gems
         effective_gems = self.gems.copy()
-        effective_gems += self.cards  # Replace this with @effective_gems
+        effective_gems += self.cards
 
         # Returned object that we will append to
         legal_buy_mask = []
@@ -275,6 +275,7 @@ class Player:
             return np.argmax(rl_moves)
         else:
             # Human call, send in the legal mask
+            # Reminder that self.model is Play/human_agent.py
             return self.model.await_move(legal_mask)
 
     def to_state(self):

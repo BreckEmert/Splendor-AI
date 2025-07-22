@@ -9,12 +9,13 @@ import threading
 import pygame
 from PIL import Image
 
-from Environment.game import Game
 from RL.model import RLAgent
+from Play.gui_game import GUIGame
 from Play.human_agent import HumanAgent
-from Play.clickmap_renderer import render_game_state, card_width, card_height
+from Play.render.board_renderer import render_game_state
+from Play.render.overlay_renderer import OverlayRenderer
 from meta.generate_images import take_3_indices, take_2_diff_indices
-from run import get_paths
+from train import get_paths
 
 
 def pil_to_surface(pil_image):
@@ -29,84 +30,54 @@ class SplendorGUI:
         self.game = game
         self.human = human
         self.window = pygame.display.set_mode((1600, 960), pygame.RESIZABLE)
+        self.overlay = OverlayRenderer(self.window)
         pygame.display.set_caption("Splendor RL - Human vs DDQN")
         self.running = True
         self._focus = None  # (tier, pos) of clicked card
-        self._ctx_rects = {}  # overlay button → move_index
+        self._ctx_rects = {}  # maps overlay button to a move_index
         self._picked: list[int] = []  # colors clicked this turn
 
-    def _is_selection_legal(self, selection, legal_mask):
+    def _is_move_legal(self, move_index: int | None) -> bool:
         """Checks if the currently selected move is legal."""
-        return legal_mask[selection]
+        # Remember that legal_mask is fresh, from await_move()
+        return (move_index is not None) and bool(self.human.legal_mask[move_index])
 
-    def _draw_button(self, rect, label: str, opacity: int) -> None:
-        """Draws all UI buttons."""
-        # Background
-        w, h = rect[2] - rect[0], rect[3] - rect[1]
-        surf = pygame.Surface((w, h), pygame.SRCALPHA)
-        surf.fill((30, 30, 30, opacity))
-        self.window.blit(surf, rect[:2])
-        
-        # Border
-        pygame.draw.rect(self.window, (255, 255, 255), rect, 2)
+    def _gem_click_allowed(self, color: int) -> bool:
+        """Returns whether the player is allowed to click this gem.
 
-        # Label
-        font = pygame.font.SysFont(None, 32)
-        txt = font.render(label, True, (255, 255, 255))
-        self.window.blit(txt, (rect[0] + 20, rect[1] + 20))
-
-    def _draw_card_context_menu(self, tier: int, pos: int, legal_mask):
-        """Paints three small buttons at the card's top‑right
-        corner and returns {button_rect: move_index}.
-        Consults _card_to_move to ......
+        Rules implemented:
+        1. Toggle-off always allowed.
+        2. Max three picks total (two for taking two of the same).
+        3. There must be at least one token of that kind.
+        4. A second click of the same color is allowed when:
+            - it would be the 2nd pick overall
+            - the stack has ≥4 tokens
         """
-        # This just has self.game.active_player... this means we never need to pass player around, no?
-        player = self.game.active_player
+        supply = self.game.board.gems[color]
+        picked = self._picked
 
-        # Render only context options which are legal
-        buy = self._card_to_move(tier, pos, "buy", player)
-        reserve = self._card_to_move(tier, pos, "reserve", player)
+        # 1. Toggle-off always allowed.
+        if color in picked:
+            return True if picked.count(color) == 1 else False
 
-        # This is going to have to have logic for buy with gold.
-        # Speaking of, I'm not actually sure how this would integrate.
-        # Because my game logic only has auto spend.  Maybe I can still
-        # choose manually no problem?
-        options = [("Buy 🔵⚪🪙", buy), ("Reserve", reserve)]
-        legal_opts = [
-            (label, move) for label, move in options 
-            if legal_mask[move]
-        ]
-        buttons = [
-            ()
-        ]
-
-        # Layout of the menu
-        button_width, button_height  = 140, 60  # size of each row
-        card_x = 200 + card_width + 50 + pos*(card_width+10)
-        card_y = 680 + (2 - tier)*(card_height + 50)
-
-        menu_x, menu_y = card_x + card_width - button_width, card_y
-
-        # Draw buttons on the menu
-        rects = {}
-        for i, (label, move) in enumerate(legal_opts):
-            r = (menu_x,
-                 menu_y + i*button_height,
-                 menu_x + button_width,
-                 menu_y + (i+1)*button_height)
-            pygame.draw.rect(self.window, (30,30,30), r)
-            pygame.draw.rect(self.window, (255,255,255), r, 2)
-
-            # Render text in that window
-            font = pygame.font.SysFont(None, 28)
-            txt = font.render(label, True, (255,255,255))
-            self.window.blit(txt, (r[0]+8, r[1]+8))
-            rects[r] = move
+        # 2. Max three picks total (two for taking two of the same).
+        if len(picked) >= 3:
+            return False
+        elif len(picked) == 2 and picked[0] == picked[1]:
+            return False
         
-        return rects
-    
-    @staticmethod
-    def _gems_to_move(picked: list[int], player) -> int | None:
+        # 3. There must be at least one token of that kind.
+        if supply == 0:
+            return False
+        
+        # 4. A second click of the same color is allowed when:
+        if len(picked) == 1 and picked[0] == color and supply < 4:
+            return False
+        
+        # All rules satisfied, return True
+        return True
+
+    def _gems_to_move(self, picked: list[int]) -> int | None:
         """Map selected gems to the engine's move_index.
         Returns None if the move is not yet legal.
 
@@ -114,13 +85,15 @@ class SplendorGUI:
             1) flashing red card on illegal click
             2) Confirm button goes green when a valid move is selected
         """
+        player = self.game.active_player
         sel = sorted(picked)
         n = len(sel)
         discards = max(0, player.gems.sum() + n - 10)
 
         # Take 3 different
         if n == 3 and len(set(sel)) == 3:
-            idx = take_3_indices.index(tuple(sel))  # 0‑9
+            a, b, c = sel  # sel is variable length so using 3 for the index would raise pylance... fix better later?
+            idx = take_3_indices.index((a, b, c))  # 0‑9
             return idx*4 + discards                 # 0‑39
 
         # Take 2 same
@@ -129,7 +102,8 @@ class SplendorGUI:
 
         # Take 2 different
         if n == 2:
-            idx = take_2_diff_indices.index(tuple(sel))  # 0‑9
+            a, b = sel
+            idx = take_2_diff_indices.index((a, b))  # 0‑9
             return 55 + idx*3 + discards                 # 55‑84
 
         # Take 1
@@ -146,125 +120,146 @@ class SplendorGUI:
         Always returns an int because caller filters legality.
         """
         player = self.game.active_player
-        take_dim = player.take_dim
-        buy_dim = player.buy_dim
 
         match variant:
             case "buy":
-                return take_dim + 2*(tier*4 + pos)
+                return player.take_dim + 2*(tier*4 + pos)
             case "buy_gold":
-                return take_dim + 2*(tier*4 + pos) + 1
+                return player.take_dim + 2*(tier*4 + pos) + 1
             case "reserve":
-                return take_dim + buy_dim + tier*5 + pos
+                return player.take_dim + player.buy_dim + tier*5 + pos
 
         raise ValueError("Error: no legal card move_index was found.")
 
-    def _draw_move_confirm_button(self):
-        """Draws the top-level Confirm/Clear buttons.
-        Update every time self._picked is changed.
+    def _handle_board_click(self, mouse_x, mouse_y, event):
+        """Click anywhere but on a card context menu"""
+        for (x0, y0, x1, y1), token in self.clickmap.items():
+            if x0 <= mouse_x <= x1 and y0 <= mouse_y <= y1:
+                # Board card was clicked
+                if token[0] == "card":
+                    self._focus = token[1:]
+
+                # Board gem was clicked
+                elif token[0] == "gem":
+                    color = token[1]
+
+                    left_click = event.button == 1
+                    right_click = event.button == 3
+
+                    # Remove token from _picked upon right click
+                    if right_click and color in self._picked:
+                        self._picked.remove(color)
+
+                    # Add to token to _picked if allowed
+                    elif left_click and self._gem_click_allowed(color):
+                        self._picked.append(color)
+                
+                # Reserved card was clicked
+                elif token[0] == "move":
+                    self.human.feed_move(token[1])
+
+                break
+    
+    def _handle_context_menu_click(self, payload):
+        """Click on a card context menu"""
+        action, move_index = payload
+
+        # Clear selection
+        if action == "clear":
+            self._picked.clear()
+
+        # Confirm selected move
+        elif action == "confirm" and move_index is not None:
+            self.human.feed_move(move_index)
+
+        # Reset overlay
+        self._focus = None
+        self._ctx_rects.clear()
+
+    def _handle_mouse_event(self, event, frame):
+        mouse_x, mouse_y = event.pos
+        scale_x, scale_y = frame.get_width(), frame.get_height()
+        mouse_x = int(mouse_x * 5000 / scale_x)
+        mouse_y = int(mouse_y * 3000 / scale_y)
+
+        # Context menu buttons
+        for rect, payload in self._ctx_rects.items():
+            x0, y0, x1, y1 = rect
+            if x0 <= mouse_x <= x1 and y0 <= mouse_y <= y1:
+                self._handle_context_menu_click(payload)
+                break
+
+        # Regular board click
+        else:
+            self._handle_board_click(mouse_x, mouse_y, event)
+
+    def _handle_event(self, event, frame):
+        if event.type == pygame.QUIT:
+            self.running = False
+            pygame.quit()
+            sys.exit()
+        elif (event.type == pygame.MOUSEBUTTONDOWN
+              and self.game.active_player is self.human):
+            self._handle_mouse_event(event, frame)
+
+    def _card_menu_options(self, tier, pos):
+        """Returns an ordered list of pairs of 
+        legal moves for the card context menu.
         """
-        button_width, button_height = 200, 80
-        base_x, base_y = 1000, 2600  # Under gems row in 5000x3000
-        move_idx = self._gems_to_move(self._picked, self.game.active_player)
+        player = self.game.active_player
+        buy = self._card_to_move(tier, pos, "buy")
+        reserve = self._card_to_move(tier, pos, "reserve")
+        moves = [("Buy 🔵⚪🪙", buy), ("Reserve", reserve)]
 
-        # Always show Clear, show Confirm when available
-        opacity = 255 if move_idx is not None else 80
-        button_specs = [
-            ("Confirm", ("confirm", None), 255),
-            ("Clear", ("clear", None), opacity)
-        ]
-
-        # Draw available buttons
-        buttons = {}
-        for i, (label, payload, opacity) in enumerate(button_specs):
-            rect = (
-                base_x,
-                base_y + i * button_height,
-                base_x + button_width,
-                base_y + (i + 1) * button_height,
-            )
-            self._draw_button(rect, label, opacity)
-            buttons[rect] = payload
-
-        return buttons
+        # Return only legal menu options to be rendered
+        return [(label, move) for label, move in moves if self._is_move_legal(move)]
 
     def run(self):
         """Side thread for GUI handling."""
         while self.running and not self.game.victor:
-            # Render
+            # Render frame and clickmap
             temp_path = "/tmp/frame.jpg"
-            clickmap = render_game_state(self.game, temp_path)
+            self.clickmap = render_game_state(self.game, temp_path)
 
             frame = pil_to_surface(Image.open(temp_path))
-            frame = pygame.transform.smoothscale(frame, self.window.get_size())
+            frame = pygame.transform.smoothscale(
+                frame,
+                self.window.get_size()
+            )
             self.window.blit(frame, (0, 0))
             pygame.display.flip()
 
-            # Handle events
+            # Process pygame events
             for event in pygame.event.get():
-                if event.type == pygame.QUIT:
-                    self.running = False
-                    pygame.quit()
-                    sys.exit()
+                self._handle_event(event, frame)
 
-                elif (
-                    event.type == pygame.MOUSEBUTTONDOWN
-                    and self.game.active_player is self.human
-                ):
-                    mouse_x, mouse_y = event.pos
-                    scale_x, scale_y = (
-                        frame.get_width(), frame.get_height()
-                    )
-                    mouse_x = int(mouse_x * 5000 / scale_x)
-                    mouse_y = int(mouse_y * 3000 / scale_y)
-
-                    # Check context-menu buttons
-                    for rect, payload in self._ctx_rects.items():
-                        x0, y0, x1, y1 = rect
-                        if x0 <= mouse_x <= x1 and y0 <= mouse_y <= y1:
-                            action, arg = payload
-                            if action == "clear":
-                                self._picked.clear()
-                            elif action == "confirm" and arg is not None:
-                                self.human.feed_move(arg)
-
-                            self._focus = None
-                            self._ctx_rects.clear()
-                            break
-
-                    else:
-                        # Normal board clicks
-                        for (x0, y0, x1, y1), token in clickmap.items():
-                            if (x0 <= mouse_x <= x1 and
-                                    y0 <= mouse_y <= y1):
-                                if token and token[0] == "card":
-                                    self._focus = token[1:]
-                                elif token and token[0] == "gem":
-                                    color = token[1]
-                                    if color in self._picked:
-                                        self._picked.remove(color)
-                                    elif len(self._picked) < 3:
-                                        self._picked.append(color)
-                                break
-
-            # Overlay
+            # Draw UI overlay (context menus or confirm buttons)
             if self._focus:
-                self._ctx_rects = self._draw_card_context_menu(*self._focus)
+                tier, pos = self._focus
+                opts = self._card_menu_options(tier, pos)
+                self._ctx_rects = self.overlay.draw_card_context_menu(
+                    tier, pos, opts
+                )
             elif self._picked:
-                self._ctx_rects = self._draw_move_confirm_button()
+                move_index = self._gems_to_move(self._picked)
+                confirm_enabled = self._is_move_legal(move_index)
+                clear_enabled = bool(self._picked)
+                self._ctx_rects = self.overlay.draw_move_confirm_button(
+                    move_index, confirm_enabled, clear_enabled
+                )
             else:
                 self._ctx_rects.clear()
 
 
 def play_one_game(model_path: str):
     # Agents
-    paths = get_paths([512, 512, 256], model_path, None, 0)  # This layer sizes is hardcoded and should probably be dynamic
+    paths = get_paths([1, 1, 1], model_path, None, 0)  # Layer sizes is stuck as an arg for now
     rl_agent = RLAgent(paths)
     human_agent = HumanAgent()
 
     # Game
     players = [("Human", human_agent), ("DDQN", rl_agent)]
-    game = Game(players, rl_agent)
+    game = GUIGame(players, rl_agent)
 
     # GUI thread
     gui = SplendorGUI(game, human_agent)

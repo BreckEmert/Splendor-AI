@@ -1,5 +1,4 @@
-# Splendor/Play/clickmap_renderer.py
-
+# Splendor/Play/render/board_renderer.py
 """
 Augments generate_images.render_game_state() to return a click-map.
 
@@ -27,7 +26,7 @@ gem_width, gem_height = 200, 200
 canvas_width, canvas_height = 5000, 3000
 
 
-def render_game_state(game, image_save_path) -> Dict[Tuple[int, int, int, int], int]:
+def render_game_state(game, image_save_path) -> Dict[Tuple[int, int, int, int], tuple]:
     """Draw game state and create clickmap."""
     clickmap = {}
     board = game.board
@@ -57,7 +56,7 @@ def render_game_state(game, image_save_path) -> Dict[Tuple[int, int, int, int], 
             path = os.path.join(base_path, "nobles", f"{noble.id}.jpg")
             image = Image.open(path)
             canvas.paste(image, (noble_x, noble_y))
-        noble_x += card_width + 50   # nobles are cosmetic (no click target)
+        noble_x += card_width + 50  # nobles are cosmetic (no click target)
 
     # Board cards
     tier_x = board_x
@@ -67,6 +66,7 @@ def render_game_state(game, image_save_path) -> Dict[Tuple[int, int, int, int], 
         cover = Image.open(os.path.join(base_path, str(tier), "cover.jpg"))
         canvas.paste(cover, (tier_x, tier_y))
 
+        # Face-up cards
         card_x = tier_x + card_width + 50
         for position, card in enumerate(cards):
             if card:
@@ -80,6 +80,15 @@ def render_game_state(game, image_save_path) -> Dict[Tuple[int, int, int, int], 
                 )
 
             card_x += card_width + 10
+
+        # Reservable top of deck
+        mark(
+            (tier_x, tier_y,
+             tier_x + card_width,
+             tier_y + card_height),
+            ("card", tier, 4)
+        )
+
         tier_y += card_height + 50
 
     # Board gems
@@ -92,8 +101,10 @@ def render_game_state(game, image_save_path) -> Dict[Tuple[int, int, int, int], 
 
         # Register this gem as a selectable token, *not* a final move.
         # We store color id so GUI can build a combo later.
-        mark((gem_x-20, gem_y-15, gem_x+gem_width, gem_y+gem_height),
-             ("gem", gem_index))
+        mark(
+            (gem_x-20, gem_y-15, gem_x+gem_width, gem_y+gem_height),
+            ("gem", gem_index)
+        )
         gem_y += gem_height + 40
 
     # Players
@@ -135,10 +146,11 @@ def render_game_state(game, image_save_path) -> Dict[Tuple[int, int, int, int], 
             # Add BUY_RESERVED click target
             if player is game.active_player:
                 move_index = player.take_dim + 24 + reserve_index*2
+                # Always tag the payload so GUI knows what it is
                 mark(
                     (current_x, current_y,
                     current_x+card_width, current_y+card_height),
-                    move_index
+                    ("move", move_index)
                 )
 
             current_x += int(card_width/3)

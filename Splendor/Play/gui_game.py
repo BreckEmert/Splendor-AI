@@ -1,4 +1,8 @@
-# Splendor/Environment/game.py
+# Splendor/Play/gui_game.py
+"""
+Mirror of Splendor/Environment/rl_game.py but with trimmed
+functionality, as well as 
+"""
 
 import numpy as np
 
@@ -6,15 +10,12 @@ from Environment.Splendor_components.Board_components.board import Board
 from Environment.Splendor_components.Player_components.player import Player
 
 
-class Game:
+class GUIGame:
     def __init__(self, players, model):
         """Note: rest of init is performed by reset()"""
-        self.players = [Player(name, rl_model) for name, rl_model in players]
+        self.players = [Player(name, model) for name, model in players]
         self.model = model
         self.reset()
-        
-        self.discard_penalty: float = -0.1  # Optional signal
-        self.final_reward: float = 5.0
     
     def reset(self):
         self.board = Board()
@@ -37,25 +38,16 @@ class Game:
         # Apply primary move
         move_index = self.active_player.choose_move(self.board, state)
         self.move_index = move_index
-        reward = self.apply_move(move_index)
 
         # Asserts to use after changing game logic
-        # assert np.all(self.board.gems >= 0), "Board gems lt0"
-        # assert np.all(self.board.gems[:5] <= 4), "Board gems gt4"
-        # assert self.active_player.gems.sum() >= 0, "Player gems lt0"
-        # assert self.active_player.gems.sum() <= 10, "Player gems gt10"
-
-        # Remember
-        next_state = self.to_state()
-        legal_mask = self.active_player.get_legal_moves(self.board)
-        sarsld = [state, move_index, reward, 
-                  next_state, legal_mask, 
-                  self.victor]
-        self.model.remember(sarsld)
+        assert np.all(self.board.gems >= 0), "Board gems lt0"
+        assert np.all(self.board.gems[:5] <= 4), "Board gems gt4"
+        assert self.active_player.gems.sum() >= 0, "Player gems lt0"
+        assert self.active_player.gems.sum() <= 10, "Player gems gt10"
 
         self.half_turns += 1
 
-    def apply_move(self, chosen_move_index):
+    def apply_move(self, chosen_move_index: int) -> None:
         player, board = self.active_player, self.board
 
         # Take gems moves
@@ -73,13 +65,9 @@ class Game:
                 discard_idx = np.random.choice(legal_discards)
                 player.gems[discard_idx] -= 1
                 board.gems[discard_idx] += 1
-                return self.discard_penalty
 
-            taken_gems, n_discards = player.auto_take(gems_to_take)
+            taken_gems, _ = player.auto_take(gems_to_take)
             board.take_gems(taken_gems)
-
-            reward = self.discard_penalty * n_discards
-            return reward
 
         # Buy card moves
         chosen_move_index -= player.take_dim
@@ -102,22 +90,13 @@ class Game:
             player.get_bought_card(bought_card)
 
             """Noble visit and end-of-game"""
-            # Base reward value
-            reward = bought_card.points
-            reward += 3 * self._check_noble_visit(player)
+            # Noble visit
+            self._check_noble_visit(player)
 
-            # Capping any points past 15
-            original_points = player.points - bought_card.points  # player already got points so need to take them back
-            reward = min(reward, 15 - original_points)  / 3  # recieve 5 reward over the whole game
-
+            # End-of-game
             if player.points >= 15:
                 self.victor = True
                 player.victor = True
-                reward += self.final_reward
-                self.model.memory[-1][2] -= self.final_reward  # Loser reward
-                self.model.memory[-1][5] = True  # Mark loser's memory as done
-            
-            return reward
         
         # Reserve card moves
         chosen_move_index -= player.buy_dim
@@ -126,29 +105,20 @@ class Game:
             card_index = chosen_move_index % 5
 
             if card_index < 4:  # Reserve from regular tier
-                reserved_card, gold = board.reserve(tier, card_index)  # DO WE NEED RESERVE FOR GOLD REWARD AND RESERVE FOR NOT?
-                # JUST GET STATISTICS ON % TIME RESERVED WHEN AVAILABLE GOLD VS NOT
-                #### ALSO CAN JUST DO ONE RESERVE OPERATION AND CHECK IF CARD INDEX IS 5
+                reserved_card, gold = board.reserve(tier, card_index)
             else:  # Reserve top
                 reserved_card, gold = board.reserve_from_deck(tier)
 
-            n_discards = 0
             player.reserved_cards.append(reserved_card)
             if gold[5]:
-                discard_if_gt10, n_discards = player.auto_take(gold)
+                discard_if_gt10, _ = player.auto_take(gold)
                 board.take_gems(discard_if_gt10)
 
-            reward = self.discard_penalty * n_discards
-            return reward
-
-    def _check_noble_visit(self, player):
-        visited = 0
+    def _check_noble_visit(self, player) -> None:
         for index, noble in enumerate(self.board.nobles):
             if noble and np.all(player.cards >= noble.cost):
                 self.board.nobles[index] = None
                 player.points += 3
-                visited += 1
-        return visited
     
     def to_state(self):
         cur_player = self.active_player
