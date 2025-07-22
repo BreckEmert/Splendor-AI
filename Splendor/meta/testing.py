@@ -1,6 +1,5 @@
 # Splendor/RL/training.py
 
-import json
 import numpy as np
 import os
 import random
@@ -8,7 +7,7 @@ import random
 from Environment.Splendor_components.Player_components.strategy import ( # type: ignore
     BestStrategy, RandomStrategy, OffensiveStrategy, ResourceHog, ObliviousStrategy
 )
-from Environment.game import Game # type: ignore
+from Environment.rl_game import Game # type: ignore
 from RL import RLAgent # type: ignore
 
 

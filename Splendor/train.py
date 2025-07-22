@@ -1,4 +1,4 @@
-# Splendor/run.py
+# Splendor/train.py
 
 import os
 from datetime import datetime, timedelta
@@ -13,8 +13,7 @@ def get_unique_filename(layer_sizes):
     return f"{timestamp}__{nickname}"
 
 def get_paths(layer_sizes, model_from_name, memory_buffer_name, log_rate):
-    """I use '_dir' for folders and '_path' for things with 
-    extensions.  Could be a dataclass if I get around to it.
+    """I use '_dir' for folders and '_path'for things with extensions.
     """
     backup_dir = os.path.dirname(os.path.abspath(__file__))
     base_dir = os.getenv('WORKSPACE_DIR', backup_dir)
@@ -72,11 +71,3 @@ if __name__ == "__main__":
     and copy.deepcopy() where needed.
     """
     main()
-
-    # Removed deepcopy(memory) - if issues spike up that's why?
-    # Currently bad changes that OBSTRUCT normal play:
-        # loser reward is divided by two, as I worry that during random play, 
-        # the model that buys the most 0 point cards ends up winning faster.
-        # it locks onto that policy too quickly?  Yeah, because it will
-        # then have cards, so in the random moves it makes it won't be 
-        # punished.
