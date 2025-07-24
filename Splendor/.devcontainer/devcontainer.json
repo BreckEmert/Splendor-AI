@@ -1,4 +1,4 @@
-// .devcontainer/devcontainer.json
+// Splendor/.devcontainer/devcontainer.json
 {
     "name": "SplendorDev",
     "build": {

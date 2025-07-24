@@ -1,4 +1,4 @@
-# Play/render/overlay_renderer.py
+# Splendor/Play/render/overlay_renderer.py
 """
 Renders any object that is not part of the base game
 """
@@ -38,8 +38,6 @@ class OverlayRenderer:
 
         That button will then lock the move in as the current
         selected move until Clear or another card menu is hit.
-
-        Consults _card_to_move to ......
         """
         # list[(label, move_idx)] is already legality‑filtered by caller
         legal_moves = button_specs
@@ -79,28 +77,22 @@ class OverlayRenderer:
         Update every time self._picked is changed.
         """
         button_width, button_height = 200, 80
-        base_x, base_y = 1000, 2600  # Under gems row in 5000x3000
+        base_x, base_y = 1000, 2600  # Under gems row - should perhaps not be hardcoded
 
-        # Whether to have Confirm active
+        # Whether to have Confirm and Clear active
         if confirm_enabled:
             confirm_opacity = 255
         else:
             move_idx = None
             confirm_opacity = 80
+        clear_opacity = 255 if clear_enabled else 80
 
-        # Whether to have Clear active
-        if clear_enabled:
-            clear_opacity = 255
-        else:
-            clear_opacity = 80
-
-        # Always show Clear, show Confirm when available
         button_specs = [
             ("Confirm", ("confirm", move_idx), confirm_opacity),
             ("Clear", ("clear", None), clear_opacity)
         ]
 
-        # Draw available buttons
+        # Draw buttons
         buttons = {}
         for i, (label, payload, opacity) in enumerate(button_specs):
             rect = (

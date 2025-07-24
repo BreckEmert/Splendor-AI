@@ -1,4 +1,6 @@
-# Splendor/Rl folder - strategy.py
+# Splendor/Rl/strategy.py
+# NOT YET IMPLEMENTED
+
 import numpy as np
 
 
@@ -15,9 +17,14 @@ class RandomStrategy():
         noise = np.random.rand(*moves.shape) - 0.5
         return moves + noise
 
-class OffensiveStrategy(Strategy):
-    def __init__(self):
-        pass
+class OffensiveStrategy():
+    """Actively look at other players' states and increase interfering logits
+    """
+    def strategize(game_state, moves, strategy_strength):
+        for player in game_state.players:
+            pass
+            # Increments move choices that align with progress towards resource cards and nobles
+            # Only distrupts if taking the gem would limit the other player's options
 
     def choosemove():
         # 1: Sum tier n gems * round weight for tier n
