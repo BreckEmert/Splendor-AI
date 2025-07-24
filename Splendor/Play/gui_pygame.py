@@ -8,6 +8,7 @@ import sys
 import threading
 import pygame
 from PIL import Image
+from typing import Any
 
 from RL.model import RLAgent
 from Play.gui_game import GUIGame
@@ -33,26 +34,17 @@ class SplendorGUI:
         self.overlay = OverlayRenderer(self.window)
         pygame.display.set_caption("Splendor RL - Human vs DDQN")
         self.running = True
+
+        # State
         self._focus = None  # (tier, pos) of clicked card
         self._ctx_rects = {}  # maps overlay button to a move_index
         self._picked: list[int] = []  # colors clicked this turn
 
     def _is_move_legal(self, move_index: int | None) -> bool:
-        """Checks if the currently selected move is legal."""
-        # Remember that legal_mask is fresh, from await_move()
         return (move_index is not None) and bool(self.human.legal_mask[move_index])
 
     def _gem_click_allowed(self, color: int) -> bool:
-        """Returns whether the player is allowed to click this gem.
-
-        Rules implemented:
-        1. Toggle-off always allowed.
-        2. Max three picks total (two for taking two of the same).
-        3. There must be at least one token of that kind.
-        4. A second click of the same color is allowed when:
-            - it would be the 2nd pick overall
-            - the stack has ≥4 tokens
-        """
+        """Click is allowed if 4 Splendor rules pass."""
         supply = self.game.board.gems[color]
         picked = self._picked
 
@@ -74,7 +66,6 @@ class SplendorGUI:
         if len(picked) == 1 and picked[0] == color and supply < 4:
             return False
         
-        # All rules satisfied, return True
         return True
 
     def _gems_to_move(self, picked: list[int]) -> int | None:
@@ -90,25 +81,25 @@ class SplendorGUI:
         n = len(sel)
         discards = max(0, player.gems.sum() + n - 10)
 
-        # Take 3 different
+        # Take 3 different, 0‑39
         if n == 3 and len(set(sel)) == 3:
             a, b, c = sel  # sel is variable length so using 3 for the index would raise pylance... fix better later?
-            idx = take_3_indices.index((a, b, c))  # 0‑9
-            return idx*4 + discards                 # 0‑39
+            idx = take_3_indices.index((a, b, c))
+            return idx*4 + discards
 
-        # Take 2 same
+        # Take 2 same, 40‑54
         if n == 2 and sel[0] == sel[1]:
-            return 40 + sel[0]*3 + discards  # 40‑54
+            return 40 + sel[0]*3 + discards
 
-        # Take 2 different
+        # Take 2 different, 55‑84
         if n == 2:
             a, b = sel
-            idx = take_2_diff_indices.index((a, b))  # 0‑9
-            return 55 + idx*3 + discards                 # 55‑84
+            idx = take_2_diff_indices.index((a, b))
+            return 55 + idx*3 + discards
 
-        # Take 1
+        # Take 1, 85‑94
         if n == 1:
-            return 85 + sel[0]*2 + discards  # 85‑94
+            return 85 + sel[0]*2 + discards
 
         # Here, we have to return None (different than _card_to_move)
         # because a selection can *eventually* end up legal.  If the
@@ -116,9 +107,6 @@ class SplendorGUI:
         return None
     
     def _card_to_move(self, tier: int, pos: int, variant: str) -> int:
-        """Map selected card + option to a move_index.
-        Always returns an int because caller filters legality.
-        """
         player = self.game.active_player
 
         match variant:
@@ -132,7 +120,6 @@ class SplendorGUI:
         raise ValueError("Error: no legal card move_index was found.")
 
     def _handle_board_click(self, mouse_x, mouse_y, event):
-        """Click anywhere but on a card context menu"""
         for (x0, y0, x1, y1), token in self.clickmap.items():
             if x0 <= mouse_x <= x1 and y0 <= mouse_y <= y1:
                 # Board card was clicked
@@ -146,11 +133,9 @@ class SplendorGUI:
                     left_click = event.button == 1
                     right_click = event.button == 3
 
-                    # Remove token from _picked upon right click
+                    # Add/remove token from _picked based on l/r click
                     if right_click and color in self._picked:
                         self._picked.remove(color)
-
-                    # Add to token to _picked if allowed
                     elif left_click and self._gem_click_allowed(color):
                         self._picked.append(color)
                 
@@ -161,14 +146,10 @@ class SplendorGUI:
                 break
     
     def _handle_context_menu_click(self, payload):
-        """Click on a card context menu"""
         action, move_index = payload
 
-        # Clear selection
         if action == "clear":
             self._picked.clear()
-
-        # Confirm selected move
         elif action == "confirm" and move_index is not None:
             self.human.feed_move(move_index)
 
@@ -202,11 +183,7 @@ class SplendorGUI:
               and self.game.active_player is self.human):
             self._handle_mouse_event(event, frame)
 
-    def _card_menu_options(self, tier, pos):
-        """Returns an ordered list of pairs of 
-        legal moves for the card context menu.
-        """
-        player = self.game.active_player
+    def _card_menu_options(self, tier: int, pos: int) -> list[tuple[str, Any]]:
         buy = self._card_to_move(tier, pos, "buy")
         reserve = self._card_to_move(tier, pos, "reserve")
         moves = [("Buy 🔵⚪🪙", buy), ("Reserve", reserve)]

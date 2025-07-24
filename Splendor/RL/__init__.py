@@ -1,4 +1,4 @@
-# Splendor/Rl/__init__.py
+# Splendor/RL/__init__.py
 
 from .model import RLAgent
 from .random_model import RandomAgent

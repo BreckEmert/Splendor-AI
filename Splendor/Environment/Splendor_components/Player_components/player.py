@@ -1,4 +1,4 @@
-# Splendor/Environment/Splendor_components/player.py
+# Splendor/Environment/Splendor_components/Player_components/player.py
 
 import numpy as np
 import itertools as it
@@ -14,9 +14,7 @@ class Player:
     
     def reset(self):
         self.gems: np.ndarray = np.zeros(6, dtype=int)  # Gold gem so 6
-        self.cards: np.ndarray = np.zeros(6, dtype=int)  # 5th dim unused
-        # self.cards = np.full(6, 1, dtype=int)  # DELETE THIS LATER, UNCOMMENT CHECK NOBLES
-        # self.cards[5] = 0  # DELETE THIS LATER
+        self.cards: np.ndarray = np.zeros(6, dtype=int)  # Last dim unused but matches 6
         self.reserved_cards: list = []
 
         self.card_ids: list = [[] for _ in range(5)]
@@ -24,14 +22,11 @@ class Player:
         self.victor: bool = False
 
     @property
-    def effective_gems(self):
+    def effective_gems(self) -> np.ndarray:
         return self.gems + self.cards
 
-    def _initialize_all_takes(self):
-        """Preloads all possible take indices that can 
-        be filtered and combined during gameplay.  Avoids 
-        a lot of recalculation each turn.
-        """
+    def _initialize_all_takes(self) -> None:
+        """Preloads all possible take indices."""
         # Take 3
         indices = list(it.combinations(range(5), 3))
         all_takes = np.zeros((10, 6), dtype=int)
@@ -54,10 +49,8 @@ class Player:
         self.all_takes_1 = np.zeros((5, 6), dtype=int)
         self.all_takes_1[np.arange(5), np.arange(5)] = 1
 
-    def _initialize_dimensions(self):
-        """Get indices used in other parts of 
-        the code to avoid some hardcoding.
-        """
+    def _initialize_dimensions(self) -> None:
+        """Preload regularly used dim vars."""
         self.take_dim = (
             len(self.all_takes_3) * 4 +       # 10 * 4
             len(self.all_takes_2_same) * 3 +  # 5 * 3
@@ -67,21 +60,17 @@ class Player:
         )
 
         self.buy_dim = (
-            3 *  # 3 tiers
-            4 *  # 4 cards per tier
-            2 +  # Buy with and without gold
-            3 *  # 3 reserve slots
-            2    # Buy with and without gold
+            3 * 4 * 2 +  # 3 tiers × 4 cards per tier × (w/wo gold)
+            3 * 2        # 3 reserve slots × (w/wo gold)
         )
 
         self.reserve_dim = (
-            3 *  # 3 tiers
-            5    # 4 cards per tier + top of deck
+            3 * 5 # 3 tiers * (4 cards per tier + top of deck)
         )
 
         self.action_dim = self.take_dim + self.buy_dim + self.reserve_dim
 
-    def get_bought_card(self, card):
+    def get_bought_card(self, card) -> None:
         """Handles all buying on the player's end except
         for the gems, which is handled by _auto_discard.
         """
@@ -89,10 +78,15 @@ class Player:
         self.points += card.points
         self.card_ids[card.gem].append((card.tier, card.id))
 
-    def auto_spend(self, raw_cost, with_gold):
+    def manual_spend(self, spent_gems) -> np.ndarray:
+        # Return spent_gems so the board can update as well
+        self.gems -= spent_gems
+        return spent_gems
+
+    def auto_spend(self, raw_cost, with_gold) -> np.ndarray:
         """For now, random spend logic.  Modifies player gems 
         IN PLACE.  Also ENSURE that this and other methods 
-        recieve .copy() objects, as this does modify card_cost.
+        receive .copy() objects, as this does modify card_cost.
         raw_cost is guaranteed to be affordable, so doing
         spent_gems[5] = card_cost.sum() is completely fine.
         """
@@ -110,13 +104,13 @@ class Player:
         self.gems -= spent_gems
         return spent_gems
 
-    def auto_take(self, gems_to_take):
-        """Add gems_to_take to self.gems, while accounting for 
-        discards by trying to discard gems that weren't taken.
-        This avoids combinatorial discard space and does not 
-        significantly limit gameplay.
+    def auto_take(self, gems_to_take) -> tuple[np.ndarray, int]:
+        """Add gems_to_take to self.gems, and if discards are
+        needed try to discard gems that weren't taken (avoids 
+        combinatorial discard space and does not significantly 
+        limit gameplay).
         
-        Ideally would have logic to competetively discard, 
+        Ideally would have logic to competitively discard, 
         (sometimes I have wanted to discard gold so that the
         gems are frozen for the enemy player) but for now that 
         is out of the learning scope.
@@ -154,7 +148,7 @@ class Player:
 
         return net_take, n_discards
 
-    def _get_legal_takes(self, board_gems):
+    def _get_legal_takes(self, board_gems) -> np.ndarray:
         """For each possible take, there are ||take|| possible
         discards.  Because these are automatically discarded
         there is no combinatorics needed.
@@ -190,29 +184,30 @@ class Player:
 
         return legal_take_mask
 
-    def _get_legal_buys(self, board_cards):
+    def _can_afford_card(self, card, effective_gems) -> tuple[bool, bool]:
+        # Calculate costs
+        gem_difference = card.cost - effective_gems
+        gold_needed = np.maximum(gem_difference, 0).sum()
+
+        # Check if we can afford it
+        can_afford = (gold_needed == 0)
+        can_afford_with_gold = (gold_needed <= effective_gems[5])
+
+        return can_afford, can_afford_with_gold
+
+    def _get_legal_buys(self, board_cards) -> list:
+        legal_buy_mask = []
+
         # Treat purchased cards as gems
         effective_gems = self.gems.copy()
         effective_gems += self.cards
-
-        # Returned object that we will append to
-        legal_buy_mask = []
 
         # Buy card
         for tier_index in range(3):
             for card_index in range(4):
                 if board_cards[tier_index][card_index]:
                     card = board_cards[tier_index][card_index]
-
-                    # Calculate costs (complicated because of gold)
-                    gem_difference = card.cost - effective_gems
-                    gold_needed = np.maximum(gem_difference, 0).sum()
-
-                    # Check if we can afford it
-                    can_afford = (gold_needed == 0)
-                    can_afford_with_gold = (gold_needed <= effective_gems[5])
-                    
-                    # Append results to the mask
+                    can_afford, can_afford_with_gold = self._can_afford_card(card, effective_gems)
                     legal_buy_mask.extend([can_afford, can_afford_with_gold])
                 else:
                     legal_buy_mask.extend([False, False])
@@ -221,27 +216,15 @@ class Player:
         for reserve_index in range(3):
             if reserve_index < len(self.reserved_cards):
                 card = self.reserved_cards[reserve_index]
-
-                # Calculate costs (complicated because of gold)
-                gem_difference = card.cost - effective_gems
-                gold_needed = np.maximum(gem_difference, 0).sum()
-
-                # Check if we can afford it
-                can_afford = (gold_needed == 0)
-                can_afford_with_gold = (gold_needed <= effective_gems[5])
-                
-                # Append results to the mask
+                can_afford, can_afford_with_gold = self._can_afford_card(card, effective_gems)
                 legal_buy_mask.extend([can_afford, can_afford_with_gold])
             else:
                 legal_buy_mask.extend([False, False])
 
         return legal_buy_mask
 
-    def _get_legal_reserves(self, board):
-        """This will almost never happen after a bit of training,
-        but while the model learns it may actually buy out all of
-        the deck, so we have to confirm there are no None.
-        """
+    def _get_legal_reserves(self, board) -> list:
+        """This will almost never happen after a bit of training"""
         if len(self.reserved_cards) < 3:
             legal_reserve_mask = []
             for tier_index, tier in enumerate(board.cards):
@@ -254,7 +237,7 @@ class Player:
         
         return legal_reserve_mask
 
-    def get_legal_moves(self, board):
+    def get_legal_moves(self, board) -> np.ndarray:
         legal_take_mask = self._get_legal_takes(board.gems)
         legal_buy_mask = self._get_legal_buys(board.cards)
         legal_reserve_mask = self._get_legal_reserves(board)
@@ -265,20 +248,20 @@ class Player:
 
         return legal_mask
 
-    def choose_move(self, board, state):
+    def choose_move(self, board, state) -> int:
         """Note: the only point by which human and AI agent differ."""
         legal_mask = self.get_legal_moves(board)
 
         if hasattr(self.model, "get_predictions"):
             # Self-play call, only need the chosen move
             rl_moves = self.model.get_predictions(state, legal_mask)
-            return np.argmax(rl_moves)
+            return int(np.argmax(rl_moves))
         else:
             # Human call, send in the legal mask
             # Reminder that self.model is Play/human_agent.py
             return self.model.await_move(legal_mask)
 
-    def to_state(self):
+    def to_state(self) -> np.ndarray:
         """Some overwriting occurs because of the 6-dim vector
         standardization, so note that not all [5] have meaning.
         """
