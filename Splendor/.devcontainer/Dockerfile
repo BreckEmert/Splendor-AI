@@ -1,3 +1,5 @@
+# Splendor/.devcontainer/Dockerfile
+
 # Official TF-gpu runtime as a parent image
 FROM tensorflow/tensorflow:2.16.1-gpu
 
@@ -9,8 +11,15 @@ ENV TF_FORCE_GPU_ALLOW_GROWTH=true
 
 
 # Install Python dependencies
-RUN pip install --no-cache-dir numpy pandas scipy openpyxl pillow && \
-    pip install --no-cache-dir debugpy
+RUN pip install --no-cache-dir \
+    pandas \
+    scipy \
+    openpyxl \
+    pillow \
+    pygame \
+    tf2onnx \
+    keras \
+    debugpy
 
 # Install font used in the game viz
 RUN apt-get update && apt-get install -y \
@@ -22,10 +31,9 @@ RUN apt-get update && apt-get install -y \
 # Create a non-root user and set permissions
 RUN useradd -m -s /bin/bash myuser && \
     mkdir -p /workspace && \
-    chown -R myuser:myuser /workspace
-
-# Switch to the non-root user
+    chown -R myuser:myuser /workspace && \
+    ldconfig && \
+    chown root:1000 /etc /etc/ld.so.cache && \
+    chmod g+w /etc /etc/ld.so.cache
 USER myuser
-
-# Set the working directory for the user
 WORKDIR /workspace
