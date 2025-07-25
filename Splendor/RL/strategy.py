@@ -1,4 +1,4 @@
-# Splendor/Rl/strategy.py
+# Splendor/RL/strategy.py
 # NOT YET IMPLEMENTED
 
 import numpy as np

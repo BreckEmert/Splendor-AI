@@ -44,9 +44,6 @@ class Board:
         return card
     
     def reserve(self, tier, position):
-        """Gold is not subtracted by this function, as 
-        player could potentially have discards.
-        """
         gold = np.zeros(6, dtype=int)
         if self.gems[5]:
             gold[5] = 1
@@ -57,7 +54,6 @@ class Board:
         return card, gold
     
     def reserve_from_deck(self, tier):
-        # Gold is not subtracted by this function, as player can discard
         gold = np.zeros(6, dtype=int)
         if self.gems[5]:
             gold[5] = 1

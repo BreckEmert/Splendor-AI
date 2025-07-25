@@ -1,4 +1,4 @@
-# Splendor/Environment/game.py
+# Splendor/Environment/rl_game.py
 
 import numpy as np
 
@@ -9,7 +9,7 @@ from Environment.Splendor_components.Player_components.player import Player
 class RLGame:
     def __init__(self, players, model):
         """Note: rest of init is performed by reset()"""
-        self.players = [Player(name, rl_model) for name, rl_model in players]
+        self.players = [Player(name, agent) for name, agent in players]
         self.model = model
         self.reset()
         
@@ -31,19 +31,16 @@ class RLGame:
         return self.players[self.half_turns % 2]
 
     def turn(self):
-        # Log previous state for model memory
         state = self.to_state()
-
-        # Apply primary move
         move_index = self.active_player.choose_move(self.board, state)
         self.move_index = move_index
         reward = self.apply_move(move_index)
+        self.half_turns += 1
 
-        # Asserts to use after changing game logic
-        # assert np.all(self.board.gems >= 0), "Board gems lt0"
-        # assert np.all(self.board.gems[:5] <= 4), "Board gems gt4"
-        # assert self.active_player.gems.sum() >= 0, "Player gems lt0"
-        # assert self.active_player.gems.sum() <= 10, "Player gems gt10"
+        assert np.all(self.board.gems >= 0), "Board gems lt0"
+        assert np.all(self.board.gems[:5] <= 4), "Board gems gt4"
+        assert self.active_player.gems.sum() >= 0, "Player gems lt0"
+        assert self.active_player.gems.sum() <= 10, "Player gems gt10"
 
         # Remember
         next_state = self.to_state()
@@ -53,9 +50,8 @@ class RLGame:
                   self.victor]
         self.model.remember(sarsld)
 
-        self.half_turns += 1
-
     def apply_move(self, chosen_move_index):
+        """Deeply sorry for the magic numbers approach."""
         player, board = self.active_player, self.board
 
         # Take gems moves
@@ -87,18 +83,15 @@ class RLGame:
             if chosen_move_index < 24:  # 12 cards * w&w/o gold
                 idx = chosen_move_index // 2
                 bought_card = board.take_card(idx//4, idx%4)  # Tier, card idx
-            else:  # Buy reserved, 3 cards* w&w/o gold
+            else:  # Buy reserved, 3  * w&w/o gold
                 card_index = (chosen_move_index-24) // 2
                 bought_card = player.reserved_cards.pop(card_index)
 
             # Player spends the tokens
             with_gold = chosen_move_index % 2  # All odd indices are gold spends
             spent_gems = player.auto_spend(bought_card.cost, with_gold=with_gold)
-
-            # Board gets them back
             board.return_gems(spent_gems)
             
-            # Player gets the card
             player.get_bought_card(bought_card)
 
             """Noble visit and end-of-game"""

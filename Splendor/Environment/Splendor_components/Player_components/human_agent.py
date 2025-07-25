@@ -1,34 +1,26 @@
-# Splendor/Play/human_agent.py
-"""
-A blocking Agent that waits for the GUI to supply a legal move.
-"""
+# Splendor/Splendor_components/Player_components/human_agent.py
 
+import numpy as np
 import queue
 
 
 class HumanAgent:
-    """Same contract as RLAgent."""
-
     def __init__(self):
-        # GUI → agent
         self._move_queue = queue.Queue(maxsize=1)
+        self.pending_spend = None
 
-    # Public GUI API
     def feed_move(self, move_index: int):
-        """Called after click detection."""
-        try:
-            self._move_queue.put(move_index, block=False)
-        except queue.Full:
-            pass  # should never happen
+        self._move_queue.put(move_index, block=False)
 
-    # Game engine callback
-    def await_move(self, legal_mask) -> int:  # noqa: N802
+    def feed_spend(self, spent_gems: np.ndarray):
+        self.pending_spend = spent_gems.copy()
+
+    def await_move(self, legal_mask) -> int:
         """Blocks until GUI pushes a legal index."""
         # Expose the legal_mask to the GUI thread
         self.legal_mask = legal_mask.copy()
 
         # Wait for a move
-        # blocks until click :contentReference[oaicite:3]{index=3}
         while True:
             move = self._move_queue.get()
             if legal_mask[move]:
