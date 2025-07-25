@@ -20,12 +20,10 @@ def pil_to_surface(pil_image):
 
 class SplendorGUI:
     def __init__(self, game, human):
-        pygame.init()
         self.game = game
         self.human = human
-        self.window = pygame.display.set_mode((1600, 960), pygame.RESIZABLE)
-        self.overlay = OverlayRenderer(self.window)
-        pygame.display.set_caption("Splendor RL - Human vs DDQN")
+        self.window = None
+        self.overlay = None
         self.running = True
 
         # State
@@ -177,27 +175,39 @@ class SplendorGUI:
             self._handle_mouse_event(event, frame)
 
     def _card_menu_options(self, tier: int, pos: int) -> list[tuple[str, Any]]:
-        buy = self._card_to_move(tier, pos, "buy")
-        buy_with_gold = self._card_to_move(tier, pos, "buy_with_gold")
-        reserve = self._card_to_move(tier, pos, "reserve")
+        # All possible
+        buy, buy_gold, reserve = (
+            self._card_to_move(tier, pos, mode)
+            for mode in ("buy", "buy_with_gold", "reserve")
+        )
+
+        # Legal ones
+        buy_ok, gold_ok, reserve_ok = (
+            self._is_move_legal(move)
+            for move in (buy, buy_gold, reserve)
+        )
 
         options = []
         card = self.game.board.cards[tier][pos] if pos < 4 else None
 
-        if card and self._is_move_legal(buy):
-            # Show only one buy option, prioritizing manual_spend
-            if self.game.active_player.gold_choice_exists(card.cost):
-                options.append(("Buy 🪙", buy_with_gold))
-            else:
+        if card:
+            # Show only one option, prioritizing manual_spend
+            if gold_ok and self.game.active_player.gold_choice_exists(card.cost):
+                options.append(("Buy 🪙", buy_gold))
+            elif buy_ok:
                 options.append(("Buy 🔵⚪🪙", buy))
-        
-        if self._is_move_legal(reserve):
+        if reserve_ok:
             options.append(("Reserve", reserve))
 
         return options
 
     def run(self):
         """Side thread for GUI handling."""
+        pygame.init()
+        self.window = pygame.display.set_mode((1600, 960), pygame.RESIZABLE)
+        self.overlay = OverlayRenderer(self.window)
+        pygame.display.set_caption("Splendor RL - Human vs DDQN")
+
         while self.running and not self.game.victor:
             # Render frame and clickmap to buffer
             buf = BytesIO()

@@ -21,11 +21,20 @@ RUN pip install --no-cache-dir \
     keras \
     debugpy
 
-# Install font used in the game viz
+# Install game viz dependencies
 RUN apt-get update && apt-get install -y \
     fontconfig && \
     fc-cache -f -v && \
     apt-get clean
+
+RUN apt-get update && \
+    DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+        libsdl2-2.0-0 \
+        libgl1 libglx-mesa0 \
+        libgl1-mesa-dri libglu1-mesa \
+        libx11-6 libxext6 libxrender1 \
+        libxrandr2 libxinerama1 libxcursor1 libxfixes3 libxi6 && \
+    rm -rf /var/lib/apt/lists/*
 
 
 # Create a non-root user and set permissions

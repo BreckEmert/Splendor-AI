@@ -97,10 +97,11 @@ def render_game_state(game, buf) -> Dict[Tuple[int, int, int, int], tuple]:
 
         # Register this gem as a selectable token, *not* a final move.
         # We store color id so GUI can build a combo later.
-        mark(
-            (gem_x-20, gem_y-15, gem_x+gem_width, gem_y+gem_height),
-            ("gem", gem_index)
-        )
+        if gem_index != 5:
+            mark(
+                (gem_x-20, gem_y-15, gem_x+gem_width, gem_y+gem_height),
+                ("gem", gem_index)
+            )
         gem_y += gem_height + 40
 
     # Players

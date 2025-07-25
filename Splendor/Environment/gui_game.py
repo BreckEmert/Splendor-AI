@@ -32,12 +32,13 @@ class GUIGame:
         move_index = self.active_player.choose_move(self.board, self.to_state())
         self.move_index = move_index
         self.apply_move(move_index)
-        self.half_turns += 1
 
         assert np.all(self.board.gems >= 0), "Board gems lt0"
         assert np.all(self.board.gems[:5] <= 4), "Board gems gt4"
         assert self.active_player.gems.sum() >= 0, "Player gems lt0"
         assert self.active_player.gems.sum() <= 10, "Player gems gt10"
+        
+        self.half_turns += 1
 
     def apply_move(self, chosen_move_index) -> None:
         """Deeply sorry for the magic numbers approach."""
