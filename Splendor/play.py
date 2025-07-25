@@ -1,6 +1,17 @@
 # Splendor/play.py
 """
 Small shim that delegates to gui_pygame.play_one_game().
+
+# Testing:
+echo $DISPLAY              # → host.docker.internal:0
+echo $SDL_VIDEODRIVER      # → x11
+
+Run from in the container:
+export DISPLAY=host.docker.internal:0
+export SDL_VIDEODRIVER=x11
+python -m play
+
+(on linux `export DISPLAY=:0`)
 """
 
 import os
@@ -12,7 +23,6 @@ from Environment.Splendor_components.Player_components import HumanAgent
 from RL import InferenceAgent
 from Play import GUIGame
 from Play.gui_pygame import SplendorGUI
-from train import get_paths
 
 
 def _resolve_model_path(argv: list[str]) -> str:
@@ -29,7 +39,7 @@ def _resolve_model_path(argv: list[str]) -> str:
     model = trained_agent_dir / "inference_model.keras"
     if model.exists():
         return str(model)
-
+    
     raise SystemExit(
         "No model supplied.\n"
         "Pass a path (python -m Splendor.play /path/model.keras), "

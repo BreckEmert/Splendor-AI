@@ -71,9 +71,11 @@ def move_to_text(move_index, player):
     if move_index < player.reserve_dim:
         tier = move_index // 5
         card_pos = move_index % 5
-        return (f"Reserve from tier {tier+1}, pos {card_pos+1}"
-                if card_pos < 4
-                else f"Reserve top card from tier {tier+1}")
+        
+        if card_pos < 4:
+            return f"Reserve from tier {tier+1}, pos {card_pos+1}"
+        else:
+            return f"Reserve top card from tier {tier+1}"
     
     # Backup discard move if none were legal
     return "Backup discard move"

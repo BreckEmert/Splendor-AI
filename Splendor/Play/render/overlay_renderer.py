@@ -102,6 +102,9 @@ class OverlayRenderer:
                 base_y + (i + 1) * button_height,
             )
             self._draw_button(rect, label, opacity)
-            buttons[rect] = payload
+
+            # Not clickable when low opacity
+            if opacity == 255:
+                buttons[rect] = payload
 
         return buttons

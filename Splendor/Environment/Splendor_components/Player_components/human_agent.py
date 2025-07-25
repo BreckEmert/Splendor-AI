@@ -10,7 +10,10 @@ class HumanAgent:
         self.pending_spend = None
 
     def feed_move(self, move_index: int):
-        self._move_queue.put(move_index, block=False)
+        if not self._move_queue.full():
+            self._move_queue.put(move_index, block=False)
+        else:
+            print("Debug: _move_queue is full.")
 
     def feed_spend(self, spent_gems: np.ndarray):
         self.pending_spend = spent_gems.copy()
@@ -26,4 +29,6 @@ class HumanAgent:
             if legal_mask[move]:
                 return move
             else:
-                raise ValueError("await_move received an illegal move")
+                print("await_move received an illegal move")
+                print("Legal mask: ", legal_mask)
+                print("move: ", move)
