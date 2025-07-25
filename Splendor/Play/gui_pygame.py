@@ -1,22 +1,15 @@
 # Splendor/Play/gui_pygame.py
-"""
-Drive a Splendor game with one HumanAgent opponent.
-"""
+"""Drive a Splendor game with one HumanAgent."""
 
-import os
 import sys
-import threading
 import pygame
+from io import BytesIO
 from PIL import Image
 from typing import Any
 
-from RL.model import RLAgent
-from Play.gui_game import GUIGame
-from Play.human_agent import HumanAgent
-from Play.render.board_renderer import render_game_state
-from Play.render.overlay_renderer import OverlayRenderer
-from meta.generate_images import take_3_indices, take_2_diff_indices
-from train import get_paths
+from Play.render import render_game_state
+from Play.render import OverlayRenderer
+from Play.render import take_3_indices, take_2_diff_indices
 
 
 def pil_to_surface(pil_image):
@@ -112,21 +105,21 @@ class SplendorGUI:
         match variant:
             case "buy":
                 return player.take_dim + 2*(tier*4 + pos)
-            case "buy_gold":
+            case "buy_with_gold":
                 return player.take_dim + 2*(tier*4 + pos) + 1
             case "reserve":
                 return player.take_dim + player.buy_dim + tier*5 + pos
 
         raise ValueError("Error: no legal card move_index was found.")
 
-    def _handle_board_click(self, mouse_x, mouse_y, event):
+    def _handle_board_click(self, mouse_x, mouse_y, event) -> None:
         for (x0, y0, x1, y1), token in self.clickmap.items():
             if x0 <= mouse_x <= x1 and y0 <= mouse_y <= y1:
-                # Board card was clicked
+                # Card was clicked
                 if token[0] == "card":
                     self._focus = token[1:]
 
-                # Board gem was clicked
+                # Gem was clicked
                 elif token[0] == "gem":
                     color = token[1]
 
@@ -145,7 +138,7 @@ class SplendorGUI:
 
                 break
     
-    def _handle_context_menu_click(self, payload):
+    def _handle_context_menu_click(self, payload) -> None:
         action, move_index = payload
 
         if action == "clear":
@@ -157,7 +150,7 @@ class SplendorGUI:
         self._focus = None
         self._ctx_rects.clear()
 
-    def _handle_mouse_event(self, event, frame):
+    def _handle_mouse_event(self, event, frame) -> None:
         mouse_x, mouse_y = event.pos
         scale_x, scale_y = frame.get_width(), frame.get_height()
         mouse_x = int(mouse_x * 5000 / scale_x)
@@ -174,31 +167,43 @@ class SplendorGUI:
         else:
             self._handle_board_click(mouse_x, mouse_y, event)
 
-    def _handle_event(self, event, frame):
+    def _handle_event(self, event, frame) -> None:
         if event.type == pygame.QUIT:
             self.running = False
             pygame.quit()
             sys.exit()
         elif (event.type == pygame.MOUSEBUTTONDOWN
-              and self.game.active_player is self.human):
+              and self.game.active_player.agent is self.human):
             self._handle_mouse_event(event, frame)
 
     def _card_menu_options(self, tier: int, pos: int) -> list[tuple[str, Any]]:
         buy = self._card_to_move(tier, pos, "buy")
+        buy_with_gold = self._card_to_move(tier, pos, "buy_with_gold")
         reserve = self._card_to_move(tier, pos, "reserve")
-        moves = [("Buy 🔵⚪🪙", buy), ("Reserve", reserve)]
 
-        # Return only legal menu options to be rendered
-        return [(label, move) for label, move in moves if self._is_move_legal(move)]
+        options = []
+        card = self.game.board.cards[tier][pos] if pos < 4 else None
+
+        if card and self._is_move_legal(buy):
+            # Show only one buy option, prioritizing manual_spend
+            if self.game.active_player.gold_choice_exists(card.cost):
+                options.append(("Buy 🪙", buy_with_gold))
+            else:
+                options.append(("Buy 🔵⚪🪙", buy))
+        
+        if self._is_move_legal(reserve):
+            options.append(("Reserve", reserve))
+
+        return options
 
     def run(self):
         """Side thread for GUI handling."""
         while self.running and not self.game.victor:
-            # Render frame and clickmap
-            temp_path = "/tmp/frame.jpg"
-            self.clickmap = render_game_state(self.game, temp_path)
-
-            frame = pil_to_surface(Image.open(temp_path))
+            # Render frame and clickmap to buffer
+            buf = BytesIO()
+            self.clickmap = render_game_state(self.game, buf)
+            buf.seek(0)
+            frame = pil_to_surface(Image.open(buf))
             frame = pygame.transform.smoothscale(
                 frame,
                 self.window.get_size()
@@ -206,11 +211,11 @@ class SplendorGUI:
             self.window.blit(frame, (0, 0))
             pygame.display.flip()
 
-            # Process pygame events
+            # pygame events
             for event in pygame.event.get():
                 self._handle_event(event, frame)
 
-            # Draw UI overlay (context menus or confirm buttons)
+            # Draw UI
             if self._focus:
                 tier, pos = self._focus
                 opts = self._card_menu_options(tier, pos)
@@ -226,36 +231,3 @@ class SplendorGUI:
                 )
             else:
                 self._ctx_rects.clear()
-
-
-def play_one_game(model_path: str):
-    # Agents
-    paths = get_paths([1, 1, 1], model_path, None, 0)  # Layer sizes is stuck as an arg for now
-    rl_agent = RLAgent(paths)
-    human_agent = HumanAgent()
-
-    # Game
-    players = [("Human", human_agent), ("DDQN", rl_agent)]
-    game = GUIGame(players, rl_agent)
-
-    # GUI thread
-    gui = SplendorGUI(game, human_agent)
-    gui_thread = threading.Thread(target=gui.run, daemon=True)
-    gui_thread.start()
-
-    # Game loop
-    while not game.victor and gui.running:
-        game.turn()  # blocks if human's turn
-
-    if gui.running:
-        winner = game.players[0] if game.players[0].victor else game.players[1]
-        print("Game over - winner:", winner.name)
-
-
-if __name__ == "__main__":
-    default_model = os.getenv("MODEL_PATH", None)
-    if not default_model:
-        msg = "Set MODEL_PATH to a .keras file or pass as CLI arg."
-        raise SystemExit(msg)
-    
-    play_one_game(default_model)

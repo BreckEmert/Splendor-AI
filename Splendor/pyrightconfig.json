@@ -1,0 +1,4 @@
+// pyrightconfig.json
+{
+  "ignore": ["RL/model.py", "RL/inference_model.py"]
+}

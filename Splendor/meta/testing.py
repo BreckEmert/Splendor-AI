@@ -1,10 +1,10 @@
-# Splendor/RL/training.py
+# Splendor/meta/testing.py
 
 import numpy as np
 import os
 import random
 
-from Environment.Splendor_components.Player_components.strategy import ( # type: ignore
+from Environment.Splendor_components.Player_components.strategy import (
     BestStrategy, RandomStrategy, OffensiveStrategy, ResourceHog, ObliviousStrategy
 )
 from Environment.rl_game import Game # type: ignore

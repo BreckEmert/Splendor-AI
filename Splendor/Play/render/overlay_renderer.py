@@ -13,7 +13,7 @@ class OverlayRenderer:
         self.window = window
         self.font = pygame.font.SysFont(None, 32)
         self.small_font = pygame.font.SysFont(None, 28)
-        # Any other persistent resources (colors, pre-loaded surfaces) can go here
+        # Eventually will need more specific and pretty resources here
 
     def _draw_button(self, rect, label: str, opacity: int) -> None:
         """Draws all UI buttons."""
@@ -32,8 +32,8 @@ class OverlayRenderer:
         self.window.blit(txt, (rect[0] + 20, rect[1] + 20))
 
     def draw_card_context_menu(self, tier: int, pos: int, button_specs) -> dict:
-        """Upon the player clicking on a card, this paints 
-        up to two buttons at the card's top‑right corner 
+        """When the player clicks a card, this paints
+        buttons at the card's top-right corner 
         and returns {button_rect: move_index}.
 
         That button will then lock the move in as the current

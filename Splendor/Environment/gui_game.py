@@ -1,19 +1,16 @@
-# Splendor/Play/gui_game.py
-"""
-Mirror of Splendor/Environment/rl_game.py but with trimmed
-functionality, as well as 
-"""
+# Splendor/Environment/gui_game.py
+"""Mirror of rl_game.py with trimmed functionality."""
 
 import numpy as np
 
-from Environment.Splendor_components.Board_components.board import Board
-from Environment.Splendor_components.Player_components.player import Player
+from Environment.Splendor_components.Board_components import Board
+from Environment.Splendor_components.Player_components import Player
 
 
 class GUIGame:
     def __init__(self, players, model):
         """Note: rest of init is performed by reset()"""
-        self.players = [Player(name, model) for name, model in players]
+        self.players = [Player(name, agent) for name, agent in players]
         self.model = model
         self.reset()
     
@@ -31,24 +28,21 @@ class GUIGame:
     def active_player(self):
         return self.players[self.half_turns % 2]
 
-    def turn(self):
-        # Log previous state for model memory
-        state = self.to_state()
-
-        # Apply primary move
-        move_index = self.active_player.choose_move(self.board, state)
+    def turn(self) -> None:
+        move_index = self.active_player.choose_move(self.board, self.to_state())
         self.move_index = move_index
+        self.apply_move(move_index)
+        self.half_turns += 1
 
-        # Asserts to use after changing game logic
         assert np.all(self.board.gems >= 0), "Board gems lt0"
         assert np.all(self.board.gems[:5] <= 4), "Board gems gt4"
         assert self.active_player.gems.sum() >= 0, "Player gems lt0"
         assert self.active_player.gems.sum() <= 10, "Player gems gt10"
 
-        self.half_turns += 1
-
-    def apply_move(self, chosen_move_index: int) -> None:
+    def apply_move(self, chosen_move_index) -> None:
+        """Deeply sorry for the magic numbers approach."""
         player, board = self.active_player, self.board
+        gems_to_take: np.ndarray | None = None
 
         # Take gems moves
         if chosen_move_index < player.take_dim:
@@ -75,25 +69,24 @@ class GUIGame:
             if chosen_move_index < 24:  # 12 cards * w&w/o gold
                 idx = chosen_move_index // 2
                 bought_card = board.take_card(idx//4, idx%4)  # Tier, card idx
-            else:  # Buy reserved, 3 cards* w&w/o gold
+            else:  # Buy reserved, 3 cards * w&w/o gold
                 card_index = (chosen_move_index-24) // 2
                 bought_card = player.reserved_cards.pop(card_index)
 
-            # Player spends the tokens
-            with_gold = chosen_move_index % 2  # All odd indices are gold spends
-            spent_gems = player.auto_spend(bought_card.cost, with_gold=with_gold)
+            # Spend the tokens
+            if getattr(player.agent, "pending_spend", None) is not None:
+                spent_gems = player.manual_spend(player.agent.pending_spend)
+                player.agent.pending_spend = None
+            else:
+                with_gold = chosen_move_index % 2  # All odd indices are gold spends
+                spent_gems = player.auto_spend(bought_card.cost, with_gold=with_gold)
 
-            # Board gets them back
             board.return_gems(spent_gems)
-            
-            # Player gets the card
             player.get_bought_card(bought_card)
 
             """Noble visit and end-of-game"""
-            # Noble visit
             self._check_noble_visit(player)
 
-            # End-of-game
             if player.points >= 15:
                 self.victor = True
                 player.victor = True
@@ -106,7 +99,7 @@ class GUIGame:
 
             if card_index < 4:  # Reserve from regular tier
                 reserved_card, gold = board.reserve(tier, card_index)
-            else:  # Reserve top
+            else:  # Reserve top of deck
                 reserved_card, gold = board.reserve_from_deck(tier)
 
             player.reserved_cards.append(reserved_card)
@@ -120,7 +113,7 @@ class GUIGame:
                 self.board.nobles[index] = None
                 player.points += 3
     
-    def to_state(self):
+    def to_state(self) -> np.ndarray:
         cur_player = self.active_player
         enemy_player = self.players[(self.half_turns+1) % 2]
 
