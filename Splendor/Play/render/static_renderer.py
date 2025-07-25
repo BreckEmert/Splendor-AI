@@ -1,12 +1,13 @@
-# Splendor/meta/generate_images.py
+# Splendor/Play/render/static_renderer.py
 
 import os
 import itertools as it
 from PIL import Image, ImageDraw, ImageFont
 
+
 # Global references
 gem_types = ['white', 'blue', 'green', 'red', 'black', 'gold']
-font_path = "/workspace/meta/arialbd.ttf"
+font_path = "/workspace/Play/render/Resources/arialbd.ttf"
 font = ImageFont.truetype(font_path, 120)
 take_3_indices = list(it.combinations(range(5), 3))
 take_2_diff_indices = list(it.combinations(range(5), 2))
@@ -70,9 +71,11 @@ def move_to_text(move_index, player):
     if move_index < player.reserve_dim:
         tier = move_index // 5
         card_pos = move_index % 5
-        return (f"Reserve from tier {tier+1}, pos {card_pos+1}"
-                if card_pos < 4
-                else f"Reserve top card from tier {tier+1}")
+        
+        if card_pos < 4:
+            return f"Reserve from tier {tier+1}, pos {card_pos+1}"
+        else:
+            return f"Reserve top card from tier {tier+1}"
     
     # Backup discard move if none were legal
     return "Backup discard move"
@@ -84,7 +87,7 @@ def render_game_state(game, image_save_path):
     turn = game.half_turns
 
     # Blank canvas, paths, and start indices
-    base_path = "/workspace/meta/images"
+    base_path = "/workspace/Play/render/Resources/images"
     table_path = os.path.join(base_path, "table.jpg")
 
     width, height = 5000, 3000

@@ -1,2 +1,1 @@
-Splendor/Play/render/board_renderer.py
-Splendor/Play/render/overlay_renderer.py
+Splendor/Environment/gui_game.py

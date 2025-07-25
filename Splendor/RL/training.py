@@ -1,7 +1,7 @@
 # Splendor/RL/training.py
 
 from Environment.rl_game import RLGame
-from meta.generate_images import draw_game_state
+from Play.render import draw_game_state
 from RL import RLAgent, RandomAgent
 
 

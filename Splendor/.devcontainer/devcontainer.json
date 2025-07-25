@@ -11,7 +11,10 @@
         "--shm-size=1g",
         "--ulimit", "memlock=-1",
         "--ulimit", "stack=67108864",
-        "--net=host"
+        "--net=host",
+        "-e", "DISPLAY=host.docker.internal:0",
+        "-e", "SDL_VIDEODRIVER=x11",
+        "-e", "SDL_RENDER_DRIVER=software"
     ],
     "workspaceFolder": "/workspace",
     "workspaceMount": "source=${localWorkspaceFolder},target=/workspace,type=bind,consistency=cached",

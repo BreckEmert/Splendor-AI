@@ -1,24 +1,20 @@
 # Splendor/Play/render/board_renderer.py
 """
-Augments generate_images.render_game_state() to return a click-map.
+Augments static_renderer.render_game_state() to return a click-map.
 
 Dict[(x0,y0,x1,y1)] -> move_index
-Coordinates mapped to the 5000×3000 frame.
+Coordinates mapped to the 5000x3000 frame.
 """
 
 import os
 from typing import Dict, Tuple
 from PIL import Image, ImageDraw, ImageFont
 
-# from meta.generate_images import gem_types, take_3_indices, take_2_diff_indices # Not needed?
-from meta.generate_images import move_to_text
+from Play.render.static_renderer import move_to_text
 
-
-# Public API
-__all__ = ["render_game_state", "draw_game_state"]
 
 # Constants
-font_path = "/workspace/meta/arialbd.ttf"
+font_path = "/workspace/Play/render/Resources/arialbd.ttf"
 font = ImageFont.truetype(font_path, 120)
 
 card_width, card_height = 300, 400
@@ -26,14 +22,14 @@ gem_width, gem_height = 200, 200
 canvas_width, canvas_height = 5000, 3000
 
 
-def render_game_state(game, image_save_path) -> Dict[Tuple[int, int, int, int], tuple]:
+def render_game_state(game, buf) -> Dict[Tuple[int, int, int, int], tuple]:
     """Draw game state and create clickmap."""
     clickmap = {}
     board = game.board
     turn = game.half_turns
 
     # Background
-    base_path = "/workspace/meta/images"
+    base_path = "/workspace/Play/render/Resources/images"
     table_path = os.path.join(base_path, "table.jpg")
     canvas = Image.open(table_path).resize((canvas_width, canvas_height))
     draw = ImageDraw.Draw(canvas)
@@ -101,10 +97,11 @@ def render_game_state(game, image_save_path) -> Dict[Tuple[int, int, int, int], 
 
         # Register this gem as a selectable token, *not* a final move.
         # We store color id so GUI can build a combo later.
-        mark(
-            (gem_x-20, gem_y-15, gem_x+gem_width, gem_y+gem_height),
-            ("gem", gem_index)
-        )
+        if gem_index != 5:
+            mark(
+                (gem_x-20, gem_y-15, gem_x+gem_width, gem_y+gem_height),
+                ("gem", gem_index)
+            )
         gem_y += gem_height + 40
 
     # Players
@@ -168,15 +165,5 @@ def render_game_state(game, image_save_path) -> Dict[Tuple[int, int, int, int], 
     # Turn indicator
     draw.text((50, 50), f"Turn {turn//2+1}", fill=(255, 255, 255), font=font)
 
-    canvas.save(image_save_path)
-
+    canvas.save(buf, format="JPEG")
     return clickmap
-
-
-def draw_game_state(episode, game):
-    """Wrapper for training."""
-    output_directory = os.path.join(game.model.paths['images_dir'], f'episode {episode}')
-    os.makedirs(output_directory, exist_ok=True)
-
-    image_path = os.path.join(output_directory, f"turn_{game.half_turns}.jpg")
-    render_game_state(game, image_path)

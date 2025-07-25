@@ -4,18 +4,17 @@ import os
 os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'  # Stop NUMA warnings
 
 import pickle
+import numpy as np
 from collections import deque
 from random import sample
-import numpy as np
 
 import tensorflow as tf
 from keras.config import enable_unsafe_deserialization                 
 from keras.layers import Input, Dense, LeakyReLU   
-from keras.losses import mean_squared_error, Huber
+from keras.losses import Huber
 from keras.models import load_model
-from keras.initializers import GlorotNormal, HeNormal
+from keras.initializers import HeNormal
 from keras.optimizers import Adam
-from keras.regularizers import l2
 
 
 class RLAgent:
@@ -23,14 +22,12 @@ class RLAgent:
         print("Making a new RLAgent.")
         enable_unsafe_deserialization()
         self.paths = paths
+        self.huber = Huber()
 
         # Dimensions
         self.state_dim = 251
         self.action_dim = 141
         self.batch_size = 512
-
-        # Huber loss
-        self.huber = Huber()
 
         # DQN
         self.gamma = 0.93
@@ -60,13 +57,13 @@ class RLAgent:
         # Model
         model_from_path = paths['model_from_path']
         if model_from_path:
-            print("Loading previous model")
-            self.model = load_model(model_from_path)
-            self.target_model = load_model(model_from_path)
+            print("Loading existing model")
+            self.model: tf.keras.Model = load_model(model_from_path)
+            self.target_model: tf.keras.Model = load_model(model_from_path)
         else:
-            self.model = self._build_model(lr_schedule)
+            self.model: tf.keras.Model = self._build_model(lr_schedule)
             self.model._name = "policy_model"
-            self.target_model = self._build_model(lr_schedule)
+            self.target_model: tf.keras.Model = self._build_model(lr_schedule)
             self.target_model._name = "target_model"
             self.target_model.set_weights(self.model.get_weights())
 
@@ -127,26 +124,23 @@ class RLAgent:
         # Input
         state_input = Input(shape=(self.state_dim, ))
 
-        # Dense layers
+        # Dense
         x = state_input
         for i, layer_size in enumerate(self.paths['layer_sizes']):
             x = Dense(layer_size, kernel_initializer=HeNormal(), 
                       name=f'dense{i+1}')(x)
             x = LeakyReLU(negative_slope=0.3)(x)
 
-        # Action layer
+        # Action
         action = Dense(self.action_dim, activation='linear', 
-                       kernel_initializer=HeNormal(),  #, kernel_regularizer=l2(0.015)
+                       kernel_initializer=HeNormal(),
                        name='action')(x)
-
-        # Final model
+        
+        # Model
         model = tf.keras.Model(inputs=state_input, outputs=action)
-
-        # Optimizer
         optimizer = Adam(learning_rate=lr_schedule, clipnorm=1.0)
-
-        # Compile and return
         model.compile(loss='mse', optimizer=optimizer)
+
         return model
     
     def _load_memory(self):
@@ -214,7 +208,8 @@ class RLAgent:
         self.memory.append(memory)
 
     @tf.function
-    def _batch_train(self, states, actions, rewards, next_states, legal_masks, dones) -> None:
+    def _batch_train(self, states, actions, rewards, next_states, 
+                     legal_masks, dones) -> tuple[tf.Tensor, tf.Tensor]:
         """The sole training function"""
         # Calculate this turn's qs with primary model
         qs = self.model(states, training=False)
@@ -237,8 +232,7 @@ class RLAgent:
         # Fit
         with tf.GradientTape() as tape:
             predictions = self.model(states, training=True)
-            loss = self.huber(target_qs, predictions)
-            # loss = mean_squared_error(target_qs, predictions)
+            loss: tf.Tensor = self.huber(target_qs, predictions)
         gradients = tape.gradient(loss, self.model.trainable_variables)
         self.model.optimizer.apply_gradients(zip(gradients, self.model.trainable_variables))
 

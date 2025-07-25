@@ -5,9 +5,9 @@ import itertools as it
 
 
 class Player:
-    def __init__(self, name, model):
+    def __init__(self, name, agent):
         self.name: str = name
-        self.model = model
+        self.agent = agent
         self.reset()
         self._initialize_all_takes()
         self._initialize_dimensions()
@@ -77,6 +77,15 @@ class Player:
         self.cards[card.gem] += 1
         self.points += card.points
         self.card_ids[card.gem].append((card.tier, card.id))
+
+    def gold_choice_exists(self, raw_cost: np.ndarray) -> bool:
+        """Don't make the human player select gems if 
+        there is only one option for spending anyway.
+        If a choice exists they must always choose manually.
+        """
+        required = np.maximum(raw_cost[:5] - self.cards[:5], 0)
+        shortage = np.maximum(required - self.gems[:5], 0).sum()
+        return self.gems[5] > shortage
 
     def manual_spend(self, spent_gems) -> np.ndarray:
         # Return spent_gems so the board can update as well
@@ -252,14 +261,14 @@ class Player:
         """Note: the only point by which human and AI agent differ."""
         legal_mask = self.get_legal_moves(board)
 
-        if hasattr(self.model, "get_predictions"):
+        if hasattr(self.agent, "get_predictions"):
             # Self-play call, only need the chosen move
-            rl_moves = self.model.get_predictions(state, legal_mask)
+            rl_moves = self.agent.get_predictions(state, legal_mask)
             return int(np.argmax(rl_moves))
         else:
             # Human call, send in the legal mask
-            # Reminder that self.model is Play/human_agent.py
-            return self.model.await_move(legal_mask)
+            # Reminder that self.agent is Play/human_agent.py
+            return self.agent.await_move(legal_mask)
 
     def to_state(self) -> np.ndarray:
         """Some overwriting occurs because of the 6-dim vector
