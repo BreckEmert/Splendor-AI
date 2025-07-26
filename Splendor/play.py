@@ -3,8 +3,11 @@
 Small shim that delegates to gui_pygame.play_one_game().
 
 # Testing:
-echo $DISPLAY              # → host.docker.internal:0
-echo $SDL_VIDEODRIVER      # → x11
+echo $DISPLAY
+ls -l /tmp/.X11-unix
+glxinfo -B | head -4
+glxgears -info | head -3
+
 
 Run from in the container:
 export DISPLAY=host.docker.internal:0
@@ -52,7 +55,7 @@ def play_one_game(model_path: str):
     human_agent = HumanAgent()
 
     # Game
-    players = [("Human", human_agent), ("DDQN", rl_agent)]
+    players = [("Human", human_agent, 0), ("DDQN", rl_agent, 1)]
     game = GUIGame(players, rl_agent)
 
     # GUI thread
