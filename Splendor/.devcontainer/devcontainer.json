@@ -11,9 +11,11 @@
         "--shm-size=1g",
         "--ulimit", "memlock=-1",
         "--ulimit", "stack=67108864",
-        "--net=host",
-        "-e", "DISPLAY=host.docker.internal:0",
+        // "--volume", "/tmp/.X11-unix:/tmp/.X11-unix:ro",
+        "--mount","type=bind,source=\\\\wsl.localhost\\Ubuntu\\mnt\\wslg\\.X11-unix,target=/tmp/.X11-unix,readonly",
+        "-e", "DISPLAY=:0",
         "-e", "SDL_VIDEODRIVER=x11",
+        "-e", "SDL_AUDIODRIVER=dummy",
         "-e", "SDL_RENDER_DRIVER=software"
     ],
     "workspaceFolder": "/workspace",
