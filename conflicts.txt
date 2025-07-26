@@ -1,1 +1,1 @@
-Splendor/Environment/gui_game.py
+Splendor/Play/render/board_geometry.py

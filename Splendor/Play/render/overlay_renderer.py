@@ -5,11 +5,12 @@ Renders any object that is not part of the base game
 
 import pygame
 
-from Play.render.board_renderer import card_width, card_height
+from Play.render import BoardGeometry
 
 
 class OverlayRenderer:
     def __init__(self, window):
+        self.geom = BoardGeometry()
         self.window = window
         self.font = pygame.font.SysFont(None, 32)
         self.small_font = pygame.font.SysFont(None, 28)
@@ -32,9 +33,8 @@ class OverlayRenderer:
         self.window.blit(txt, (rect[0] + 20, rect[1] + 20))
 
     def draw_card_context_menu(self, tier: int, pos: int, button_specs) -> dict:
-        """When the player clicks a card, this paints
-        buttons at the card's top-right corner 
-        and returns {button_rect: move_index}.
+        """When the player clicks a card, this paints buttons at the 
+        card's top-right corner and returns {button_rect: move_index}.
 
         That button will then lock the move in as the current
         selected move until Clear or another card menu is hit.
@@ -44,10 +44,10 @@ class OverlayRenderer:
 
         # Layout of the menu
         button_width, button_height  = 140, 60  # size of each row
-        card_x = 200 + card_width + 50 + pos*(card_width+10)
-        card_y = 680 + (2 - tier)*(card_height + 50)
+        card_x = 200 + self.geom.card.x + 50 + pos*(self.geom.card.x+10)
+        card_y = 680 + (2 - tier)*(self.geom.card.y + 50)
 
-        menu_x, menu_y = card_x + card_width - button_width, card_y
+        menu_x, menu_y = card_x + self.geom.card.x - button_width, card_y
 
         # Draw buttons on the menu
         rects = {}

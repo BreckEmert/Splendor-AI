@@ -7,7 +7,7 @@ from io import BytesIO
 from PIL import Image
 from typing import Any
 
-from Play.render import render_game_state
+from Play.render import BoardRenderer
 from Play.render import OverlayRenderer
 from Play.render import take_3_indices, take_2_diff_indices
 
@@ -25,6 +25,7 @@ class SplendorGUI:
         self.window = None
         self.overlay = None
         self.running = True
+        self._renderer = BoardRenderer()
 
         # State
         self._focus = None  # (tier, pos) of clicked card
@@ -211,7 +212,7 @@ class SplendorGUI:
         while self.running and not self.game.victor:
             # Render frame and clickmap to buffer
             buf = BytesIO()
-            self.clickmap = render_game_state(self.game, buf)
+            self.clickmap = self._renderer.render(self.game, buf)
             buf.seek(0)
             frame = pil_to_surface(Image.open(buf))
             frame = pygame.transform.smoothscale(

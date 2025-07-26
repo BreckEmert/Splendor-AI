@@ -1,169 +1,260 @@
-# Splendor/Play/render/board_renderer.py
-"""
-Augments static_renderer.render_game_state() to return a click-map.
-
-Dict[(x0,y0,x1,y1)] -> move_index
-Coordinates mapped to the 5000x3000 frame.
-"""
+# Splendor/Play/render/board_renderer.py 
 
 import os
 from typing import Dict, Tuple
 from PIL import Image, ImageDraw, ImageFont
 
+from Environment.gui_game import GUIGame
+from Play.render import BoardGeometry, Coord
 from Play.render.static_renderer import move_to_text
 
 
-# Constants
-font_path = "/workspace/Play/render/Resources/arialbd.ttf"
-font = ImageFont.truetype(font_path, 120)
-
-card_width, card_height = 300, 400
-gem_width, gem_height = 200, 200
-canvas_width, canvas_height = 5000, 3000
-
-
-def render_game_state(game, buf) -> Dict[Tuple[int, int, int, int], tuple]:
-    """Draw game state and create clickmap."""
-    clickmap = {}
-    board = game.board
-    turn = game.half_turns
-
-    # Background
-    base_path = "/workspace/Play/render/Resources/images"
-    table_path = os.path.join(base_path, "table.jpg")
-    canvas = Image.open(table_path).resize((canvas_width, canvas_height))
-    draw = ImageDraw.Draw(canvas)
-
-    board_x, board_y = 200, 680
-    player1_x, player1_y = 2600, 200
-    player2_x, player2_y = 2600, 1700
-    start_positions = [(player1_x, player1_y), (player2_x, player2_y)]
-
-    # Clickable area register
-    def mark(rect, index):
-        clickmap[rect] = index
-
-    # Nobles
-    noble_x = board_x + card_width + 50
-    noble_y = board_y
-    for noble in board.nobles:
-        noble_x += 50
-        if noble:
-            path = os.path.join(base_path, "nobles", f"{noble.id}.jpg")
-            image = Image.open(path)
-            canvas.paste(image, (noble_x, noble_y))
-        noble_x += card_width + 50  # nobles are cosmetic (no click target)
-
-    # Board cards
-    tier_x = board_x
-    tier_y = noble_y + card_height + 50
-    for reversed_tier, cards in enumerate(reversed(board.cards)):
-        tier = 2 - reversed_tier
-        cover = Image.open(os.path.join(base_path, str(tier), "cover.jpg"))
-        canvas.paste(cover, (tier_x, tier_y))
-
-        # Face-up cards
-        card_x = tier_x + card_width + 50
-        for position, card in enumerate(cards):
-            if card:
-                # Open a context menu to allow for buy w/wo gold and reserve
-                card_path = os.path.join(base_path, str(tier), f"{card.id}.jpg")
-                card_image = Image.open(card_path)
-                canvas.paste(card_image, (card_x, tier_y))
-                mark(
-                    (card_x, tier_y, card_x+card_width, tier_y+card_height),
-                    ("card", tier, position)
-                )
-
-            card_x += card_width + 10
-
-        # Reservable top of deck
-        mark(
-            (tier_x, tier_y,
-             tier_x + card_width,
-             tier_y + card_height),
-            ("card", tier, 4)
-        )
-
-        tier_y += card_height + 50
-
-    # Board gems
-    gem_x = board_x + (card_width*5 + 150)
-    gem_y = board_y + card_height//2
-    for gem_index, gem_count in enumerate(board.gems):
-        gem_image = Image.open(os.path.join(base_path, "gems", f"{gem_index}.png"))
-        canvas.paste(gem_image, (gem_x-20, gem_y-15), gem_image.split()[3])
-        draw.text((gem_x+gem_width+10, gem_y), str(gem_count), fill=(255, 255, 255), font=font)
-
-        # Register this gem as a selectable token, *not* a final move.
-        # We store color id so GUI can build a combo later.
-        if gem_index != 5:
-            mark(
-                (gem_x-20, gem_y-15, gem_x+gem_width, gem_y+gem_height),
-                ("gem", gem_index)
-            )
-        gem_y += gem_height + 40
-
-    # Players
-    for player_idx, (player, (player_x, player_y)) in enumerate(
-        zip(game.players, start_positions)
+class BoardRenderer:
+    def __init__(
+        self,
+        resource_root: str = "/workspace/Play/render/Resources",
+        font_path: str = "/workspace/Play/render/Resources/arialbd.ttf"
     ):
-        current_x, current_y = player_x, player_y
+        # Paths
+        self.resource_root = resource_root
+        self.images_root = os.path.join(self.resource_root, "images")
+        self.font_path = font_path
 
-        # Gems and owned cards
-        for gem_index, gem_count in enumerate(player.gems):
-            gem_path = os.path.join(base_path, "gems", f"{gem_index}.png")
+        # Assets
+        self.font = ImageFont.truetype(self.font_path, 120)
+
+        # Runtime state
+        self._canvas: Image.Image
+        self.geom = BoardGeometry()
+        self.draw: ImageDraw.ImageDraw
+        self._clickmap: Dict[Tuple[int, int, int, int], tuple] = {}
+        self.game: GUIGame
+
+    # Public API
+    def render(self, game, buf):
+        self.game = game
+        self._reset_canvas()
+
+        # Draw board
+        self._draw_background()
+        self._draw_nobles(game.board.nobles)
+        self._draw_board_cards(game.board)
+        self._draw_board_gems(game.board)
+
+        # Draw Players
+        for player in game.players:
+            self._draw_player(player)
+
+        # Draw HUD
+        self._draw_turn_indicator(game.half_turns)
+
+        self._save(buf)
+        return self._clickmap
+
+    # Internals
+    def _reset_canvas(self):
+        self._canvas = Image.new("RGB", self.geom.canvas)
+        self.draw = ImageDraw.Draw(self._canvas)
+        self._clickmap: Dict[Tuple[int, int, int, int], tuple] = {}
+
+    def _mark(self, rect: Tuple[int, int, int, int], payload):
+        """Register a board region as clickable payload."""
+        self._clickmap[rect] = payload
+
+    def _player_origin(self, pos: int) -> Coord:
+        return self.geom.player_origins[pos]
+
+    def _reserve_origin(self, pos: int) -> Coord:
+        return self.geom.reserve_origins[pos]
+
+    def _draw_background(self):
+        table_path = os.path.join(self.images_root, "table.jpg")
+        table_image = Image.open(table_path).convert("RGB").resize(self.geom.canvas)  # SHOULD BE CONVERTED TO BYTESIO?
+        self._canvas.paste(table_image, (0, 0))
+
+    def _draw_nobles(self, nobles):
+        # Nobles
+        noble_x = self.geom.deck_origin.x + self.geom.card.x + 50
+        noble_y = self.geom.deck_origin.y
+        for noble in nobles:
+            noble_x += 50
+            if noble:
+                noble_path = os.path.join(self.images_root, "nobles", f"{noble.id}.jpg")
+                noble_image = Image.open(noble_path)
+                self._canvas.paste(noble_image, (noble_x, noble_y))
+            noble_x += self.geom.card.x + 50  # Cosmetic only
+
+    def _draw_board_cards(self, board):
+        # Tier covers + face‑up cards
+        tier_x, tier_y = self.geom.deck_origin.x, self.geom.deck_origin.y + self.geom.card.y + 50
+
+        for reversed_tier, tier_cards in enumerate(reversed(board.cards)):
+            tier = 2 - reversed_tier
+
+            # Cover
+            cover_path = os.path.join(
+                self.images_root,
+                str(tier),
+                "cover.jpg",
+            )
+            cover_image = Image.open(cover_path)
+            self._canvas.paste(cover_image, (tier_x, tier_y))
+
+            # Face‑up cards
+            card_x = tier_x + self.geom.card.x + 50
+            for position, card in enumerate(tier_cards):
+                if card:
+                    card_path = os.path.join(
+                        self.images_root,
+                        str(tier),
+                        f"{card.id}.jpg",
+                    )
+                    card_image = Image.open(card_path)
+                    self._canvas.paste(card_image, (card_x, tier_y))
+                    self._mark((
+                            card_x,
+                            tier_y,
+                            card_x + self.geom.card.x,
+                            tier_y + self.geom.card.y,
+                        ), ("card", tier, position),
+                    )
+                card_x += self.geom.card.x + 10
+
+            # Deck top (reservable)
+            self._mark((
+                    tier_x,
+                    tier_y,
+                    tier_x + self.geom.card.x,
+                    tier_y + self.geom.card.y,
+                ), ("card", tier, 4),
+            )
+
+            tier_y += self.geom.card.y + 50
+
+    def _draw_board_gems(self, board):
+        # Board gems
+        gem_x = self.geom.deck_origin.x + (self.geom.card.x*5 + 150)
+        gem_y = self.geom.deck_origin.y + self.geom.card.y//2
+
+        for gem_index, gem_count in enumerate(board.gems):
+            gem_path = os.path.join(
+                self.images_root,
+                "gems",
+                f"{gem_index}.png",
+            )
             gem_image = Image.open(gem_path)
 
-            # Pile gems
-            for _ in range(gem_count):
-                canvas.paste(gem_image, (current_x, current_y), gem_image.split()[3])
-                current_y += int(gem_height/1.7)
-
-            # Owned cards (skip gold)
-            if gem_index != 5:
-                current_y = player_y + int(gem_height*2.1)
-                for tier, card_id in player.card_ids[gem_index]:
-                    card_path = os.path.join(base_path, str(tier), f"{card_id}.jpg")
-                    card_image = Image.open(card_path)
-                    canvas.paste(card_image, (current_x, current_y))
-                    current_y += int(card_height/7)
-
-            current_x += card_width + 50
-            current_y = player_y
-
-        # Reserved cards
-        current_x -= card_width + 50
-        current_y += 600
-        for reserve_index, card in enumerate(player.reserved_cards):
-            reserved_path = os.path.join(base_path, str(card.tier), f"{card.id}.jpg")
-            reserved_image = Image.open(reserved_path)
-            canvas.paste(reserved_image, (current_x, current_y))
-
-            # Add BUY_RESERVED click target
-            if player is game.active_player:
-                move_index = player.take_dim + 24 + reserve_index*2
-                # Always tag the payload so GUI knows what it is
-                mark(
-                    (current_x, current_y,
-                    current_x+card_width, current_y+card_height),
-                    ("move", move_index)
-                )
-
-            current_x += int(card_width/3)
-            current_y += int(card_height/3)
-
-        # Last move annotation
-        if player is not game.active_player:
-            move_text = move_to_text(game.move_index, player)
-            text_y = player_y - 170 if player_idx == 0 else player_y + 1115
-            draw.text(
-                (player_x, text_y), move_text,
-                fill=(255, 255, 255), font=font
+            # Gem sprite and count
+            self._canvas.paste(
+                gem_image,
+                (gem_x-20, gem_y-15),
+                gem_image.split()[3],
+            )
+            self.draw.text(
+                (gem_x + self.geom.gem.x + 10, gem_y),
+                str(gem_count),
+                fill=(255, 255, 255),
+                font=self.font,
             )
 
-    # Turn indicator
-    draw.text((50, 50), f"Turn {turn//2+1}", fill=(255, 255, 255), font=font)
+            # Clickable non‑gold tokens
+            if gem_index != 5:
+                self._mark((
+                        gem_x-20,
+                        gem_y-15,
+                        gem_x + self.geom.gem.x,
+                        gem_y + self.geom.gem.y,
+                    ), ("gem", gem_index),
+                )
 
-    canvas.save(buf, format="JPEG")
-    return clickmap
+            gem_y += self.geom.gem.y + 40
+
+    def _draw_player(self, player):
+        # Gems and owned cards
+        start_x, start_y = self._player_origin(player.pos)
+        current_x, current_y = start_x, start_y
+
+        for gem_index, gem_count in enumerate(player.gems):
+            gem_path = os.path.join(self.images_root, "gems", f"{gem_index}.png")
+            gem_image = Image.open(gem_path)
+
+            # Token pile
+            for _ in range(gem_count):
+                self._canvas.paste(
+                    gem_image,
+                    (current_x, current_y),
+                    gem_image.split()[3],
+                )
+                current_y += int(self.geom.gem.y / 1.7)
+
+            # Permanent bonus cards (skip gold)
+            if gem_index != 5:
+                current_y = start_y + int(self.geom.gem.y * 2.1)
+                for tier, card_id in player.card_ids[gem_index]:
+                    card_path = os.path.join(
+                        self.images_root,
+                        str(tier),
+                        f"{card_id}.jpg",
+                    )
+                    card_image = Image.open(card_path)
+                    self._canvas.paste(card_image, (current_x, current_y))
+                    current_y += int(self.geom.card.y / 7)
+
+            current_x += self.geom.card.x + 50
+            current_y = start_y
+
+        # Reserved cards
+        # reserved_origin = (current_x - self.geom.card.x - 50, start_y + 600)  OLD LINE
+        self._draw_reserved_cards(player)
+
+        # Last move
+        if player is not self.game.active_player:
+            self._draw_last_move(player)
+
+    def _draw_reserved_cards(self, player):
+        # Reserved cards
+        x, y = self._reserve_origin(player.pos)
+
+        for reserve_idx, card in enumerate(player.reserved_cards):
+            card_path = os.path.join(
+                self.images_root,
+                str(card.tier),
+                f"{card.id}.jpg",
+            )
+            card_image = Image.open(card_path)
+            self._canvas.paste(card_image, (x, y))
+
+            # Click target for active player
+            if player is self.game.active_player:
+                move_idx = player.take_dim + 24 + reserve_idx * 2
+                self._mark(
+                    (x, y, x + self.geom.card.x, y + self.geom.card.y),
+                    ("move", move_idx),
+                )
+
+            # Fan offset
+            x += self.geom.card.x // 3
+            y += self.geom.card.y // 3
+
+    def _draw_last_move(self, player):
+        """Annotate the board with the last move."""
+        move_text = move_to_text(self.game.move_index, player)
+        x, y = self._player_origin(player.pos)
+
+        # Place text above the upper player, and below the lower
+        text_y = y - 170 if y < self.geom.canvas.y // 2 else y + 1115
+        self.draw.text((x, text_y), move_text, fill=(255, 255, 255), font=self.font)
+
+    def _draw_turn_indicator(self, half_turns: int):
+        turn_num = half_turns // 2 + 1
+        self.draw.text((50, 50), f"Turn {turn_num}",
+                       fill=(255, 255, 255), font=self.font)
+
+    def _save(self, buf):
+        """Persist composed canvas to the provided buffer."""
+        self._canvas.save(buf, format="JPEG")
+        buf.seek(0)
+
+    @property
+    def clickmap(self) -> Dict[Tuple[int, int, int, int], tuple]:
+        return self._clickmap.copy()

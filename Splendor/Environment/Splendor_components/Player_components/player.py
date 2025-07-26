@@ -3,11 +3,15 @@
 import numpy as np
 import itertools as it
 
+from Environment.Splendor_components.Player_components import HumanAgent
+from RL import InferenceAgent
+
 
 class Player:
-    def __init__(self, name, agent):
-        self.name: str = name
+    def __init__(self, name: str, agent: InferenceAgent | HumanAgent, pos: int):
+        self.name = name
         self.agent = agent
+        self.pos = pos
         self.reset()
         self._initialize_all_takes()
         self._initialize_dimensions()

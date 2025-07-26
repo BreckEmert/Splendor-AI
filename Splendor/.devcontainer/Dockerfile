@@ -33,7 +33,8 @@ RUN apt-get update && \
         libgl1 libglx-mesa0 \
         libgl1-mesa-dri libglu1-mesa \
         libx11-6 libxext6 libxrender1 \
-        libxrandr2 libxinerama1 libxcursor1 libxfixes3 libxi6 && \
+        libxrandr2 libxinerama1 libxcursor1 libxfixes3 libxi6 \
+        mesa-utils && \
     rm -rf /var/lib/apt/lists/*
 
 

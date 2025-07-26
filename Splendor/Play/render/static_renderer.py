@@ -82,7 +82,7 @@ def move_to_text(move_index, player):
 
 
 # Draw the game
-def render_game_state(game, image_save_path):
+def render_board(game, image_save_path):
     board = game.board
     turn = game.half_turns
 
@@ -210,4 +210,4 @@ def draw_game_state(episode, game):
     os.makedirs(output_dir, exist_ok=True)
 
     image_path = os.path.join(output_dir, f"turn_{game.half_turns}.jpg")
-    render_game_state(game, image_path)
+    render_board(game, image_path)
