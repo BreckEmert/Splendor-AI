@@ -1,4 +1,4 @@
-# Splendor/train.py
+# Splendor/train_ai.py
 
 import os
 from datetime import datetime, timedelta

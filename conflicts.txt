@@ -1,1 +1,2 @@
-Splendor/Play/render/board_geometry.py
+Splendor/Play/common_types.py
+Splendor/play_vs_ai.py
