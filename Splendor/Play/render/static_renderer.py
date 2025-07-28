@@ -13,7 +13,7 @@ take_3_indices = list(it.combinations(range(5), 3))
 take_2_diff_indices = list(it.combinations(range(5), 2))
 
 # Convert a move index into text
-def move_to_text(move_index, player):
+def move_to_text(move_index: int, player):
     if move_index < player.take_dim:
         if move_index < 40:
             local_index = move_index
@@ -82,7 +82,7 @@ def move_to_text(move_index, player):
 
 
 # Draw the game
-def render_board(game, image_save_path):
+def render_board(game, image_save_path: str):
     board = game.board
     turn = game.half_turns
 

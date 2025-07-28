@@ -1,10 +1,13 @@
 # Splendor/Environment/Splendor_components/Player_components/player.py
 
+from __future__ import annotations
 import numpy as np
 import itertools as it
+from typing import TYPE_CHECKING
 
-from Environment.Splendor_components.Player_components import HumanAgent
-from RL import InferenceAgent
+if TYPE_CHECKING:
+    from .human_agent import HumanAgent
+    from RL import InferenceAgent
 
 
 class Player:
@@ -267,12 +270,12 @@ class Player:
 
         if hasattr(self.agent, "get_predictions"):
             # Self-play call, only need the chosen move
-            rl_moves = self.agent.get_predictions(state, legal_mask)
+            rl_moves = self.agent.get_predictions(state, legal_mask)  # type: ignore
             return int(np.argmax(rl_moves))
         else:
             # Human call, send in the legal mask
             # Reminder that self.agent is Play/human_agent.py
-            return self.agent.await_move(legal_mask)
+            return self.agent.await_move(legal_mask)  # type: ignore
 
     def to_state(self) -> np.ndarray:
         """Some overwriting occurs because of the 6-dim vector

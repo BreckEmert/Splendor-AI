@@ -9,7 +9,7 @@ from Environment.Splendor_components.Player_components.player import Player
 class RLGame:
     def __init__(self, players, model):
         """Note: rest of init is performed by reset()"""
-        self.players = [Player(name, agent) for name, agent in players]
+        self.players = [Player(name, agent, pos) for name, agent, pos in players]
         self.model = model
         self.reset()
         

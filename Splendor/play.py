@@ -44,17 +44,15 @@ def _resolve_model_path(argv: list[str]) -> str:
         return str(model)
     
     raise SystemExit(
-        "No model supplied.\n"
+        "No model found or supplied.\n"
         "Pass a path (python -m Splendor.play /path/model.keras), "
         "set MODEL_PATH, or drop a *.keras file in RL/trained_agents/"
     )
 
 def play_one_game(model_path: str):
-    # Agents
+    # Game
     rl_agent = InferenceAgent(model_path)
     human_agent = HumanAgent()
-
-    # Game
     players = [("Human", human_agent, 0), ("DDQN", rl_agent, 1)]
     game = GUIGame(players, rl_agent)
 

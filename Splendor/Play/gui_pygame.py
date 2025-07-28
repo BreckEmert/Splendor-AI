@@ -5,32 +5,42 @@ import sys
 import pygame
 from io import BytesIO
 from PIL import Image
-from typing import Any
+from typing import Any, NamedTuple
 
-from Play.render import BoardRenderer
-from Play.render import OverlayRenderer
-from Play.render import take_3_indices, take_2_diff_indices
+from Play.render import (
+    BoardRenderer,
+    OverlayRenderer,
+    Rect,
+    take_3_indices, 
+    take_2_diff_indices
+)
 
 
-def pil_to_surface(pil_image):
+def pil_to_surface(pil_image):  # Should this really be outside of class?
     """Convert PIL image to pygame surface."""
     return pygame.image.fromstring(
         pil_image.tobytes(), pil_image.size, pil_image.mode
     ).convert()
+
+
+class CardIndex(NamedTuple):
+    tier: int
+    pos: int
+
 
 class SplendorGUI:
     def __init__(self, game, human):
         self.game = game
         self.human = human
         self.window = None
-        self.overlay = None
+        self.overlay: OverlayRenderer
         self.running = True
         self._renderer = BoardRenderer()
 
         # State
-        self._focus = None  # (tier, pos) of clicked card
+        self._focused_card: CardIndex | None = None
+        self._picked_tokens: list[int] = []
         self._ctx_rects = {}  # maps overlay button to a move_index
-        self._picked: list[int] = []  # colors clicked this turn
 
     def _is_move_legal(self, move_index: int | None) -> bool:
         return (move_index is not None) and bool(self.human.legal_mask[move_index])
@@ -38,7 +48,7 @@ class SplendorGUI:
     def _gem_click_allowed(self, color: int) -> bool:
         """Click is allowed if 4 Splendor rules pass."""
         supply = self.game.board.gems[color]
-        picked = self._picked
+        picked = self._picked_tokens
 
         # 1. Toggle-off always allowed.
         if color in picked:
@@ -75,7 +85,7 @@ class SplendorGUI:
 
         # Take 3 different, 0‑39
         if n == 3 and len(set(sel)) == 3:
-            a, b, c = sel  # sel is variable length so using 3 for the index would raise pylance... fix better later?
+            a, b, c = sel
             idx = take_3_indices.index((a, b, c))
             return idx*4 + discards
 
@@ -112,11 +122,11 @@ class SplendorGUI:
         raise ValueError("Error: no legal card move_index was found.")
 
     def _handle_board_click(self, mouse_x, mouse_y, event) -> None:
-        for (x0, y0, x1, y1), token in self.clickmap.items():
-            if x0 <= mouse_x <= x1 and y0 <= mouse_y <= y1:
+        for rect, token in self.clickmap.items():
+            if rect.contains(mouse_x, mouse_y):
                 # Card was clicked
                 if token[0] == "card":
-                    self._focus = token[1:]
+                    self._focused_card = CardIndex(*token[1:])
 
                 # Gem was clicked
                 elif token[0] == "gem":
@@ -125,11 +135,11 @@ class SplendorGUI:
                     left_click = event.button == 1
                     right_click = event.button == 3
 
-                    # Add/remove token from _picked based on l/r click
-                    if right_click and color in self._picked:
-                        self._picked.remove(color)
+                    # Add/remove token from _picked_tokens based on l/r click
+                    if right_click and color in self._picked_tokens:
+                        self._picked_tokens.remove(color)
                     elif left_click and self._gem_click_allowed(color):
-                        self._picked.append(color)
+                        self._picked_tokens.append(color)
                 
                 # Reserved card was clicked
                 elif token[0] == "move":
@@ -141,39 +151,47 @@ class SplendorGUI:
         action, move_index = payload
 
         if action == "clear":
-            self._picked.clear()
+            self._picked_tokens.clear()
         elif action == "confirm" and move_index is not None:
             self.human.feed_move(move_index)
 
         # Reset overlay
-        self._focus = None
+        self._focused_card = None
         self._ctx_rects.clear()
 
-    def _handle_mouse_event(self, event, frame) -> None:
+    def _handle_mouse_event(self, event) -> None:
         mouse_x, mouse_y = event.pos
-        scale_x, scale_y = frame.get_width(), frame.get_height()
-        mouse_x = int(mouse_x * 5000 / scale_x)
-        mouse_y = int(mouse_y * 3000 / scale_y)
+        sx, sy = self.overlay.scale()
+        mouse_x = int(mouse_x / sx)
+        mouse_y = int(mouse_y / sy)
 
-        # Context menu buttons
         for rect, payload in self._ctx_rects.items():
-            x0, y0, x1, y1 = rect
-            if x0 <= mouse_x <= x1 and y0 <= mouse_y <= y1:
+            # Context menu buttons
+            if rect.contains(mouse_x, mouse_y):
                 self._handle_context_menu_click(payload)
                 break
-
-        # Regular board click
         else:
+            # Regular board click
             self._handle_board_click(mouse_x, mouse_y, event)
 
-    def _handle_event(self, event, frame) -> None:
+    def _handle_event(self, event) -> None:
         if event.type == pygame.QUIT:
             self.running = False
             pygame.quit()
             sys.exit()
         elif (event.type == pygame.MOUSEBUTTONDOWN
               and self.game.active_player.agent is self.human):
-            self._handle_mouse_event(event, frame)
+            self._handle_mouse_event(event)
+        elif event.type == pygame.VIDEORESIZE:
+            # Lock aspect ratio
+            w, h = event.size
+            ratio = self._renderer.geom.canvas[0] / self._renderer.geom.canvas[1]
+            if w / h > ratio:
+                w = int(h * ratio)
+            else:
+                h = int(w / ratio)
+            self.window = pygame.display.set_mode((w, h), pygame.RESIZABLE)
+            self.overlay.update_window(self.window)
 
     def _card_menu_options(self, tier: int, pos: int) -> list[tuple[str, Any]]:
         # All possible
@@ -205,14 +223,17 @@ class SplendorGUI:
     def run(self):
         """Side thread for GUI handling."""
         pygame.init()
-        self.window = pygame.display.set_mode((1600, 960), pygame.RESIZABLE)
+        self.window = pygame.display.set_mode(
+            self._renderer.geom.default_canvas_scale, 
+            pygame.RESIZABLE
+        )
         self.overlay = OverlayRenderer(self.window)
         pygame.display.set_caption("Splendor RL - Human vs DDQN")
 
         while self.running and not self.game.victor:
             # Render frame and clickmap to buffer
             buf = BytesIO()
-            self.clickmap = self._renderer.render(self.game, buf)
+            self.clickmap: dict[Rect, tuple] = self._renderer.render(self.game, buf)
             buf.seek(0)
             frame = pil_to_surface(Image.open(buf))
             frame = pygame.transform.smoothscale(
@@ -220,23 +241,26 @@ class SplendorGUI:
                 self.window.get_size()
             )
             self.window.blit(frame, (0, 0))
+            self.overlay.draw_selection_highlights(
+                self.clickmap, self._focused_card, self._picked_tokens
+            )
             pygame.display.flip()
 
             # pygame events
             for event in pygame.event.get():
-                self._handle_event(event, frame)
+                self._handle_event(event)
 
             # Draw UI
-            if self._focus:
-                tier, pos = self._focus
+            if self._focused_card:
+                tier, pos = self._focused_card
                 opts = self._card_menu_options(tier, pos)
                 self._ctx_rects = self.overlay.draw_card_context_menu(
                     tier, pos, opts
                 )
-            elif self._picked:
-                move_index = self._gems_to_move(self._picked)
+            elif self._picked_tokens:
+                move_index = self._gems_to_move(self._picked_tokens)
                 confirm_enabled = self._is_move_legal(move_index)
-                clear_enabled = bool(self._picked)
+                clear_enabled = bool(self._picked_tokens)
                 self._ctx_rects = self.overlay.draw_move_confirm_button(
                     move_index, confirm_enabled, clear_enabled
                 )

@@ -10,7 +10,7 @@ from Environment.Splendor_components.Player_components import Player
 class GUIGame:
     def __init__(self, players, model):
         """Note: rest of init is performed by reset()"""
-        self.players = [Player(name, agent) for name, agent in players]
+        self.players = [Player(name, agent, pos) for name, agent, pos in players]
         self.model = model
         self.reset()
     
@@ -75,9 +75,9 @@ class GUIGame:
                 bought_card = player.reserved_cards.pop(card_index)
 
             # Spend the tokens
-            if getattr(player.agent, "pending_spend", None) is not None:
-                spent_gems = player.manual_spend(player.agent.pending_spend)
-                player.agent.pending_spend = None
+            if getattr(player.agent, "pending_spend", None):
+                spent_gems = player.manual_spend(player.agent.pending_spend)  # type: ignore
+                player.agent.pending_spend = None  # type: ignore
             else:
                 with_gold = chosen_move_index % 2  # All odd indices are gold spends
                 spent_gems = player.auto_spend(bought_card.cost, with_gold=with_gold)
