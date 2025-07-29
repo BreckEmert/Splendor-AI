@@ -9,9 +9,9 @@ class HumanAgent:
         self._move_queue = queue.Queue(maxsize=1)
         self.pending_spend = None
 
-    def feed_move(self, move_index: int):
+    def feed_move(self, move_idx: int):
         if not self._move_queue.full():
-            self._move_queue.put(move_index, block=False)
+            self._move_queue.put(move_idx, block=False)
         else:
             print("Debug: _move_queue is full.")
 

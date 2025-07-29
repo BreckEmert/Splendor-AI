@@ -4,8 +4,10 @@ Renders any object that is not part of the base game
 """
 
 import pygame
+from collections import Counter
 
-from Play.render import BoardGeometry, Rect
+from Play import FocusTarget, ClickMap
+from Play.render import BoardGeometry, Coord, Rect
 
 
 class OverlayRenderer:
@@ -28,7 +30,12 @@ class OverlayRenderer:
     def update_window(self, window: pygame.Surface) -> None:
         self.window = window
 
-    def draw_selection_highlights(self, clickmap, focused_card, picked_gems):
+    def draw_selection_highlights(
+            self, 
+            clickmap: ClickMap, 
+            focus_target: FocusTarget | None, 
+            picked_gems
+        ) -> None:
         """Highlights selections that are queued for a move."""
         sx, sy = self.scale()
 
@@ -36,16 +43,44 @@ class OverlayRenderer:
             r_win = rect.scaled(sx, sy).to_pygame()
             pygame.draw.rect(self.window, color, r_win, 6)
 
-        # Focused board card
-        if focused_card:
+        if focus_target:
+            match focus_target.kind:
+                case "shop":
+                    key = ("board_card", focus_target.tier, focus_target.pos)
+                    for r, payload in clickmap.items():
+                        if payload == key:
+                            outline(r, (255, 255, 0))
+                            break
+                case "deck":
+                    key = ("board_card", focus_target.tier, 4)
+                    for r, payload in clickmap.items():
+                        if payload == key:
+                            outline(r, (255, 255, 0))
+                            break
+                case "reserved":
+                    for r, payload in clickmap.items():
+                        if payload[0] == "reserved_card" and payload[1] == focus_target.reserve_idx:
+                            outline(r, (255, 255, 0))
+                            break
+        # Temporarily keeping my old gems logic while I decide how to factor the new:
+        # else:  # gems
+        #     for r, payload in clickmap.items():
+        #         if payload[0] == "gem" and payload[1] in picked_gems:
+        #             outline(r, (0, 255, 0))
+        else:  # gems
+            counts = Counter(picked_gems)
             for r, payload in clickmap.items():
-                if payload[0] == "card" and payload[1:] == focused_card:
-                    outline(r, (255, 255, 0))
-        else:
-            # Picked gems
-            for r, payload in clickmap.items():
-                if payload[0] == "gem" and payload[1] in picked_gems:
+                if payload[0] == "gem" and payload[1] in counts:
                     outline(r, (0, 255, 0))
+                    c = counts[payload[1]]
+                    if c > 1:  # x2 visual cue
+                        r_win = r.scaled(sx, sy).to_pygame()
+                        tag = self.small_font.render(f"x{c}", True, (255, 255, 0))
+                        self.window.blit(
+                            tag,
+                            (r_win.right - tag.get_width() - 4,
+                             r_win.bottom - tag.get_height() - 4)
+                        )
 
     def _draw_button(self, rect: Rect, label: str, alpha: int) -> None:
         """Draws the move Submit/Clear button."""
@@ -70,33 +105,31 @@ class OverlayRenderer:
 
     def draw_card_context_menu(
             self, 
-            tier: int, # Noting that this is class CardIndex, but that would be circular...
-            pos: int, 
-            button_specs: list[tuple[str, int]]
+            origin: Coord,
+            button_specs: list[tuple[str, int]],
         ) -> dict:
         """When the player clicks a card, this paints buttons at the 
-        card's top-right corner and returns {button_rect: move_index}.
+        card's top-right corner and returns {button_rect: move_idx}.
 
         That button will then lock the move in as the current
         selected move until Clear or another card menu is hit.
         """
-        # Layout of the menu
+        # Layout
         g = self.geom
-        card_x = g.deck_origin.x + (1 + pos)*(g.card.x + g.card_offset.w)
-        card_y = g.deck_origin.y + (2 - tier)*(g.card.y + g.card_offset.h)
-
+        card_x, card_y = origin
         menu_x, menu_y = card_x + g.card.x - g.button.x, card_y
 
-        # Draw buttons on the menu
+        # Draw
         rects = {}
         for i, (label, move) in enumerate(button_specs):
+            # Box
             menu_height = i * g.button.y
             r = Rect.from_size(menu_x, menu_y + menu_height, *g.button)
             r_win = self.to_window(r).to_pygame()
             pygame.draw.rect(self.window, (30,30,30), r_win)
             pygame.draw.rect(self.window, (255,255,255), r_win, 2)
 
-            # Render text in that window
+            # Text
             txt = self.small_font.render(label, True, (255,255,255))
             self.window.blit(txt, (r_win.x+8, r_win.y+8))
             rects[r] = ("confirm", move)
