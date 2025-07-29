@@ -1,10 +1,11 @@
 # Splendor/Play/render/board_renderer.py 
 
 import os
-from typing import Dict, Tuple
 from PIL import Image, ImageDraw, ImageFont
+from io import BytesIO
 
 from Environment.gui_game import GUIGame
+from Play import ClickMap, ClickToken
 from Play.render import BoardGeometry, Rect, Coord
 from Play.render.static_renderer import move_to_text
 
@@ -26,11 +27,11 @@ class BoardRenderer:
         self._canvas: Image.Image
         self.geom = BoardGeometry()
         self.draw: ImageDraw.ImageDraw
-        self._clickmap: Dict[Rect, tuple] = {}
+        self._clickmap: ClickMap = {}
         self.game: GUIGame
 
     # Public API
-    def render(self, game, buf):
+    def render(self, game: GUIGame, buf: BytesIO):
         self.game = game
         self._reset_canvas()
 
@@ -65,7 +66,7 @@ class BoardRenderer:
         self.draw = ImageDraw.Draw(self._canvas)
         self._clickmap = {}
 
-    def _mark(self, rect: Rect, payload):
+    def _mark(self, rect: Rect, payload: ClickToken):
         """Register a board region as clickable payload."""
         self._clickmap[rect] = payload
 
@@ -100,7 +101,7 @@ class BoardRenderer:
             self._canvas.paste(cover_image, (deck_x, y))
             self._mark(
                 Rect.from_size(deck_x, y, *g.card), 
-                ("card", tier, 4),
+                ("board_card", tier, 4),
             )
 
             # Face‑up cards
@@ -115,12 +116,34 @@ class BoardRenderer:
                     self._canvas.paste(card_image, (x, y))
                     self._mark(
                         Rect.from_size(x, y, *g.card), 
-                        ("card", tier, position),
+                        ("board_card", tier, position),
                     )
                 x += card_width + g.card_offset.w
 
             x = g.shop_origin.x
             y += card_height + g.card_offset.h
+
+    def _draw_reserved_cards(self, player):
+        # Reserved cards
+        g = self.geom
+        x, y = g.reserve_origin(player.pos)
+
+        for reserve_idx, card in enumerate(player.reserved_cards):
+            card_path = os.path.join(self.img_root, str(card.tier), f"{card.id}.jpg")
+            card_image = self._load(card_path, g.card)
+            self._canvas.paste(card_image, (x, y))
+
+            # Click target only for active player
+            if player is self.game.active_player:
+                move_idx = player.take_dim + 24 + reserve_idx * 2
+                self._mark(
+                    Rect.from_size(x, y, *g.card), 
+                    ("reserved_card", reserve_idx, move_idx),
+                )
+
+            # Fan offset
+            x += g.reserve_offset.w
+            y += g.reserve_offset.h
 
     def _draw_board_gems(self, board):
         g = self.geom
@@ -190,31 +213,9 @@ class BoardRenderer:
         if player is not self.game.active_player:
             self._draw_last_move(player)
 
-    def _draw_reserved_cards(self, player):
-        # Reserved cards
-        g = self.geom
-        x, y = g.reserve_origin(player.pos)
-
-        for reserve_idx, card in enumerate(player.reserved_cards):
-            card_path = os.path.join(self.img_root, str(card.tier), f"{card.id}.jpg")
-            card_image = self._load(card_path, g.card)
-            self._canvas.paste(card_image, (x, y))
-
-            # Click target only for active player
-            if player is self.game.active_player:
-                move_idx = player.take_dim + 24 + reserve_idx * 2
-                self._mark(
-                    Rect.from_size(x, y, *g.card), 
-                    ("move", move_idx),
-                )
-
-            # Fan offset
-            x += g.reserve_offset.w
-            y += g.reserve_offset.h
-
     def _draw_last_move(self, player):
         """Annotate the board with the last move."""
-        move_text = move_to_text(self.game.move_index, player)
+        move_text = move_to_text(self.game.move_idx, player)
         x, y = self.geom.move_text_origin(player.pos)
         self.draw.text((x, y), move_text, fill=(255, 255, 255), font=self.font)
 
@@ -228,5 +229,5 @@ class BoardRenderer:
         buf.seek(0)
 
     @property
-    def clickmap(self) -> Dict[Rect, tuple]:
+    def clickmap(self) -> ClickMap:
         return self._clickmap.copy()

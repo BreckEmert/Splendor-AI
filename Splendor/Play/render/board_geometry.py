@@ -76,7 +76,7 @@ class BoardGeometry:
     reserve_offset: Size = Size(50, 66)
 
     # UI elements
-    button: Coord = Coord(70, 30)
+    button: Coord = Coord(155, 35)
     confirm_origin: Coord = Coord(500, 1300)
 
     # Origins
@@ -93,8 +93,8 @@ class BoardGeometry:
         Coord(2175, 1150)
     )
     move_text_origins: Tuple[Coord, Coord] = (
-        Coord(1300, 85), 
-        Coord(1300, 1400)  # Noting that things like this could be flipped if I get this upside down
+        Coord(1300, 10), 
+        Coord(1300, 1400)
     )
 
     def player_origin(self, pos: int) -> Coord:

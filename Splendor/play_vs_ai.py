@@ -1,13 +1,6 @@
-# Splendor/play.py
+# Splendor/play_vs_ai.py
 """
-Small shim that delegates to gui_pygame.play_one_game().
-
-# Testing:
-echo $DISPLAY
-ls -l /tmp/.X11-unix
-glxinfo -B | head -4
-glxgears -info | head -3
-
+Thin wrapper for gui_pygame.play_one_game().
 
 Run from in the container:
 export DISPLAY=host.docker.internal:0
@@ -15,6 +8,12 @@ export SDL_VIDEODRIVER=x11
 python -m play
 
 (on linux `export DISPLAY=:0`)
+
+# Testing if something goes wrong:
+echo $DISPLAY
+ls -l /tmp/.X11-unix
+glxinfo -B | head -4
+glxgears -info | head -3
 """
 
 import os
@@ -53,7 +52,7 @@ def play_one_game(model_path: str):
     # Game
     rl_agent = InferenceAgent(model_path)
     human_agent = HumanAgent()
-    players = [("Human", human_agent, 0), ("DDQN", rl_agent, 1)]
+    players = [("DDQN", rl_agent, 0), ("Human", human_agent, 1)]
     game = GUIGame(players, rl_agent)
 
     # GUI thread
