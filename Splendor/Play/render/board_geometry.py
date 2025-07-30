@@ -76,7 +76,7 @@ class BoardGeometry:
     reserve_offset: Size = Size(50, 66)
 
     # UI elements
-    button: Coord = Coord(155, 35)
+    button: Coord = Coord(155, 50)
     confirm_origin: Coord = Coord(500, 1300)
 
     # Origins

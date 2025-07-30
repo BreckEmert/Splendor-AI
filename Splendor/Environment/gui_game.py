@@ -2,6 +2,7 @@
 """Mirror of rl_game.py with trimmed functionality."""
 
 import numpy as np
+import time
 
 from Environment.Splendor_components.Board_components import Board
 from Environment.Splendor_components.Player_components import Player
@@ -29,6 +30,7 @@ class GUIGame:
         return self.players[self.half_turns % 2]
 
     def turn(self) -> None:
+        time.sleep(1.5)
         move_idx = self.active_player.choose_move(self.board, self.to_state())
         self.move_idx = move_idx
         self.apply_move(move_idx)

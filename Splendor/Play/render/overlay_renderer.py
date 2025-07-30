@@ -62,18 +62,13 @@ class OverlayRenderer:
                         if payload[0] == "reserved_card" and payload[1] == focus_target.reserve_idx:
                             outline(r, (255, 255, 0))
                             break
-        # Temporarily keeping my old gems logic while I decide how to factor the new:
-        # else:  # gems
-        #     for r, payload in clickmap.items():
-        #         if payload[0] == "gem" and payload[1] in picked_gems:
-        #             outline(r, (0, 255, 0))
         else:  # gems
             counts = Counter(picked_gems)
             for r, payload in clickmap.items():
                 if payload[0] == "gem" and payload[1] in counts:
                     outline(r, (0, 255, 0))
                     c = counts[payload[1]]
-                    if c > 1:  # x2 visual cue
+                    if len(counts) == 1 and c == 2:  # x2 visual cue
                         r_win = r.scaled(sx, sy).to_pygame()
                         tag = self.small_font.render(f"x{c}", True, (255, 255, 0))
                         self.window.blit(
@@ -99,6 +94,7 @@ class OverlayRenderer:
 
         # Label
         txt = self.small_font.render(label, True, (255, 255, 255))
+        # txt = self.small_font.render(label, fgcolor=(255,255,255))
         tx = x0 + (w - txt.get_width()) // 2  # center horizontally
         ty = y0 + (h - txt.get_height()) // 2  # center vertically
         self.window.blit(txt, (tx, ty))
@@ -124,15 +120,9 @@ class OverlayRenderer:
         for i, (label, move) in enumerate(button_specs):
             # Box
             menu_height = i * g.button.y
-            r = Rect.from_size(menu_x, menu_y + menu_height, *g.button)
-            r_win = self.to_window(r).to_pygame()
-            pygame.draw.rect(self.window, (30,30,30), r_win)
-            pygame.draw.rect(self.window, (255,255,255), r_win, 2)
-
-            # Text
-            txt = self.small_font.render(label, True, (255,255,255))
-            self.window.blit(txt, (r_win.x+8, r_win.y+8))
-            rects[r] = ("confirm", move)
+            rect = Rect.from_size(menu_x, menu_y+menu_height, *g.button)
+            self._draw_button(rect, label, alpha=200)
+            rects[rect] = ("confirm", move)
         
         return rects
     
