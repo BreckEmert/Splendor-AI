@@ -1,5 +1,5 @@
 # Splendor/Play/gui_pygame.py
-"""Drive a Splendor game with one HumanAgent."""
+"""Conducts the game and renderers through pygame."""
 
 import sys
 import pygame
@@ -23,6 +23,27 @@ def pil_to_surface(pil_image):
     ).convert()
 
 
+class UILock:
+    """Block all UI clicks while AI is thinking and
+    after each human move to allow the player to see
+    the consequences of their move.
+    """
+    def __init__(self, game, human):
+        self._game = game
+        self._human = human
+        self._locked_until: int | None = None  # in ms
+
+    @property
+    def active(self) -> bool:
+        now = pygame.time.get_ticks()
+        awaiting_move = getattr(self._human, "awaiting_move", False)
+        human_pause = self._locked_until is not None and now < self._locked_until
+        return human_pause or not awaiting_move
+
+    def arm_delay(self, ms: int) -> None:
+        self._locked_until = pygame.time.get_ticks() + ms
+
+
 class SplendorGUI:
     def __init__(self, game, human):
         self.game = game
@@ -31,6 +52,10 @@ class SplendorGUI:
         self._renderer = BoardRenderer()
         self.window = None
         self.running = True
+
+        # UI locks
+        self.delay_after_move: int = 3000
+        self.lock = UILock(game, human)
 
         # State
         self._focus_target: FocusTarget | None = None
@@ -45,27 +70,28 @@ class SplendorGUI:
         supply = self.game.board.gems[color]
         picked = self._picked_tokens
 
-        # 1. Toggle-off always allowed.
-        if color in picked:
-            return True if picked.count(color) == 1 else False
-
-        # 2. Max three picks total (two for taking two of the same).
+        # 1. Max three picks total (two for taking two of the same).
         if len(picked) >= 3:
             return False
         elif len(picked) == 2 and picked[0] == picked[1]:
             return False
         
-        # 3. There must be at least one token of that kind.
+        # 2. There must be at least one token of that kind.
         if supply == 0:
             return False
         
-        # 4. A second click of the same color is allowed when:
+        # 3. A second click of the same color is allowed when:
         if len(picked) == 1 and picked[0] == color and supply < 4:
             return False
         
+        # 4. Once you've picked 2 diff you must keep picking diff
+        if len(picked) >= 2 and color in picked:
+            return False
+        
         # 5. A player can have at most 10 gems.
+        # THIS IS NOT CORRECT - NEED TO IMPLEMENT PLAYER GEMS AS VALID DISCARD CLICKS INSTEAD WHEN THIS FAILS
         if self.game.active_player.gems.sum() + len(picked) + 1 > 10:
-            return False  # THIS IS NOT CORRECT - NEED TO IMPLEMENT PLAYER GEMS AS VALID DISCARD CLICKS INSTEAD WHEN THIS FAILS
+            return False
         
         return True
 
@@ -125,34 +151,27 @@ class SplendorGUI:
         raise ValueError("Error: no legal card move_idx was found.")
 
     def _handle_board_click(self, mouse_x, mouse_y, button: int) -> None:
-        for rect, token in self.clickmap.items():
+        for rect, token in reversed(list(self.clickmap.items())):
             if rect.contains(mouse_x, mouse_y):
-                left_click = button == 1
-                right_click = button == 3
+                # Right click unfocuses any card
+                if button == 3 and token[0] != "gem":
+                    self._focus_target = None
+                    break
 
                 if token[0] == "board_card":
-                    # Focus/unfocus card based on l/r click
                     clicked_target = FocusTarget.from_index(*token[1:])
-                    if right_click and self._focus_target == clicked_target:
-                        self._focus_target = None
-                    elif left_click:
-                        self._picked_tokens.clear()
-                        self._focus_target = clicked_target
+                    self._picked_tokens.clear()
+                    self._focus_target = clicked_target
                 elif token[0] == "reserved_card":
-                    reserve_idx = token[1]  # # Factor out this right click logic!!!!
-                    if right_click and self._focus_target and \
-                       self._focus_target.kind == "reserved" and \
-                       self._focus_target.reserve_idx == reserve_idx:
-                        self._focus_target = None
-                    elif left_click:
-                        self._picked_tokens.clear()
-                        self._focus_target = FocusTarget("reserved", reserve_idx=reserve_idx)
+                    self._picked_tokens.clear()
+                    reserve_idx = token[1]
+                    self._focus_target = FocusTarget("reserved", reserve_idx=reserve_idx)
                 elif token[0] == "gem":
                     # Add/remove token based on l/r click
                     color = token[1]
-                    if right_click and color in self._picked_tokens:
+                    if button == 3 and color in self._picked_tokens:
                         self._picked_tokens.remove(color)
-                    elif left_click and self._gem_click_allowed(color):
+                    elif button == 1 and self._gem_click_allowed(color):
                         self._focus_target = None
                         self._picked_tokens.append(color)
 
@@ -165,6 +184,7 @@ class SplendorGUI:
             self._focus_target = None
         elif action == "confirm" and move_idx is not None:
             self.human.feed_move(move_idx)
+            self.lock.arm_delay(self.delay_after_move)
         
         # Reset overlay
         self._focus_target = None
@@ -188,11 +208,12 @@ class SplendorGUI:
 
     def _handle_event(self, event: pygame.event.Event) -> None:
         if event.type == pygame.QUIT:
+            print("Exiting through _handle_event")
             self.running = False
-            pygame.quit()
-            sys.exit()
+            # pygame.quit()
+            # sys.exit()
         elif (event.type == pygame.MOUSEBUTTONDOWN
-              and self.game.active_player.agent is self.human):
+              and not self.lock.active):
             self._handle_mouse_event(event)
         elif event.type == pygame.VIDEORESIZE:
             # Lock aspect ratio
@@ -204,6 +225,10 @@ class SplendorGUI:
                 h = int(w / ratio)
             self.window = pygame.display.set_mode((w, h), pygame.RESIZABLE)
             self.overlay.update_window(self.window)
+        elif event.type == pygame.USEREVENT and self._awaiting_ai:
+            # Unlock UI after trigger we set goes off
+            print("unarming lock")
+            self._awaiting_ai = False
 
     def _card_menu_options(self, focus: FocusTarget) -> list[tuple[str, int]]:
         """Get legal (label, move_idx) pairs for card clicks."""
@@ -241,10 +266,12 @@ class SplendorGUI:
         for mode, idx in legal:
             match mode:
                 case "buy" | "buy_reserved":
-                    opts.append(("Buy 🔵⚪🪙", idx))
+                    opts.append(("Buy 🔵⚪🟤", idx))
                 case "buy_with_gold" | "buy_reserved_with_gold":
                     if card and p.gold_choice_exists(card.cost):
                         opts.append(("Buy 🪙", idx))
+                    else:
+                        opts.append(("Buy 🔵⚪🪙", idx))
                 case "reserve":
                     opts.append(("Reserve", idx))
 
@@ -271,35 +298,54 @@ class SplendorGUI:
                 self.window.get_size()
             )
             self.window.blit(frame, (0, 0))
-            self.overlay.draw_selection_highlights(
-                self.clickmap, self._focus_target, self._picked_tokens
-            )
+
+            # Don't continue if locked
+            if self.lock.active:
+                pygame.display.flip()
+                continue
 
             # pygame events
             for event in pygame.event.get():
                 self._handle_event(event)
 
             # Draw UI
+            self.overlay.draw_selection_highlights(
+                self.clickmap, self._focus_target, self._picked_tokens
+            )
+
             if self._focus_target:
                 # Draw Submit/Clear button and context menu for clicked cards
-                card_idx = self._focus_target.card_index
-                if card_idx:
-                    options = self._card_menu_options(self._focus_target)
-                    origin = next(
-                        (Coord(r.x0, r.y0) for r, p in self.clickmap.items()
-                         if p == ("board_card", card_idx.tier, card_idx.pos)),
-                        None,
-                    )
-                    if origin is None:  # Need to comment why this happens
-                        g = self._renderer.geom
-                        origin = Coord(
-                            g.deck_origin.x + (1 + card_idx.pos)
-                                            * (g.card.x + g.card_offset.w),
-                            g.deck_origin.y + (2 - card_idx.tier)
-                                            * (g.card.y + g.card_offset.h),
+                options = self._card_menu_options(self._focus_target)
+                origin = None
+
+                match self._focus_target.kind:
+                    case "shop":
+                        origin = next(
+                            (Coord(r.x0, r.y0) for r, p in self.clickmap.items()
+                             if p == ("board_card",
+                                      self._focus_target.tier,
+                                      self._focus_target.pos)),
+                            None,
                         )
+                    case "deck":
+                        origin = next(
+                            (Coord(r.x0, r.y0) for r, p in self.clickmap.items()
+                             if p == ("board_card",
+                                      self._focus_target.tier,
+                                      4)),
+                            None,
+                        )
+                    case "reserved":
+                        origin = next(
+                            (Coord(r.x0, r.y0) for r, p in self.clickmap.items()
+                             if p[0] == "reserved_card"
+                                and p[1] == self._focus_target.reserve_idx),
+                            None,
+                        )
+
+                if origin is not None and options:
                     self._ctx_rects = self.overlay.draw_card_context_menu(
-                        origin, options, 
+                        origin, options,
                     )
             elif self._picked_tokens:
                 # Draw Submit/Clear button for clicked tokens
@@ -313,3 +359,28 @@ class SplendorGUI:
                 self._ctx_rects.clear()
 
             pygame.display.flip()
+        
+        else:
+            if self.game.victor:
+                font = pygame.font.SysFont(None, 72)
+                txt  = font.render(
+                    f"{self.game.active_player.name} wins!",
+                    True, (255, 215, 0)
+                )
+                rect = txt.get_rect(center=self.window.get_rect().center)
+                self.window.blit(txt, rect)
+                pygame.display.flip()
+
+                waiting = True
+                while waiting:
+                    for event in pygame.event.get():
+                        if event.type in (
+                            pygame.QUIT,
+                            pygame.KEYDOWN,
+                            pygame.MOUSEBUTTONDOWN
+                        ):
+                            print("quitting because of ", event)
+                            waiting = False
+
+        pygame.quit()
+        sys.exit()
