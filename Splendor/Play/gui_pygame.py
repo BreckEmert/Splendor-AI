@@ -2,17 +2,21 @@
 """Conducts the game and renderers through pygame."""
 
 import sys
-import pygame
 from io import BytesIO
 from PIL import Image
+from typing import TYPE_CHECKING
 
+import numpy as np
+import pygame
+
+if TYPE_CHECKING:
+    from Environment.Splendor_components.Board_components.deck import Card
+from Play.common_types import GUIMove
 from Play import ClickMap, FocusTarget
 from Play.render import (
     BoardRenderer,
     OverlayRenderer,
-    Coord,
-    take_3_indices, 
-    take_2_diff_indices
+    Coord
 )
 
 
@@ -45,11 +49,13 @@ class UILock:
 
 
 class SplendorGUI:
-    def __init__(self, game, human):
+    def __init__(self, game, human, preview_rewards: bool):
         self.game = game
         self.human = human
         self.overlay: OverlayRenderer
         self._renderer = BoardRenderer()
+        self.rewards = game.rewards
+        self.preview_rewards = preview_rewards
         self.window = None
         self.running = True
 
@@ -57,18 +63,20 @@ class SplendorGUI:
         self.delay_after_move: int = 3000
         self.lock = UILock(game, human)
 
+        # Caches
+        self._preview_state: tuple[FocusTarget | None, tuple[int, ...]] = (None, ())
+        self._preview_lines: list[str] = []
+
         # State
         self._focus_target: FocusTarget | None = None
-        self._picked_tokens: list[int] = []
+        self._picked_gems: list[int] = []
+        self._discarded_gems: list[int] = []
         self._ctx_rects = {}  # maps overlay button to a move_idx
 
-    def _is_move_legal(self, move_idx: int | None) -> bool:
-        return (move_idx is not None) and bool(self.human.legal_mask[move_idx])
-
-    def _gem_click_allowed(self, color: int) -> bool:
+    def _is_gem_click_allowed(self, color: int) -> bool:
         """Click is allowed if 4 Splendor rules pass."""
         supply = self.game.board.gems[color]
-        picked = self._picked_tokens
+        picked = self._picked_gems
 
         # 1. Max three picks total (two for taking two of the same).
         if len(picked) >= 3:
@@ -90,105 +98,83 @@ class SplendorGUI:
         
         # 5. A player can have at most 10 gems.
         # THIS IS NOT CORRECT - NEED TO IMPLEMENT PLAYER GEMS AS VALID DISCARD CLICKS INSTEAD WHEN THIS FAILS
+        # needs to be updated with if it's a discard click or a board supply click now
         if self.game.active_player.gems.sum() + len(picked) + 1 > 10:
             return False
         
         return True
-
-    def _gems_to_move(self, picked: list[int]) -> int | None:
-        """Map selected gems to the engine's move_idx.
-        Returns None if the move is not yet legal.
-
-        Goal with these two "to_move" methods:
-            1) flashing red card on illegal click
-            2) Confirm button goes green when a valid move is selected
-        """
-        player = self.game.active_player
-        sel = sorted(picked)
-        n = len(sel)
-        discards = max(0, player.gems.sum() + n - 10)
-
-        # Take 3 different, 0‑39
-        if n == 3 and len(set(sel)) == 3:
-            a, b, c = sel
-            idx = take_3_indices.index((a, b, c))
-            return idx*4 + discards
-
-        # Take 2 same, 40‑54
-        if n == 2 and sel[0] == sel[1]:
-            return 40 + sel[0]*3 + discards
-
-        # Take 2 different, 55‑84
-        if n == 2:
-            a, b = sel
-            idx = take_2_diff_indices.index((a, b))
-            return 55 + idx*3 + discards
-
-        # Take 1, 85‑94
-        if n == 1:
-            return 85 + sel[0]*2 + discards
-
-        # Here, we have to return None (different than _card_to_move)
-        # because a selection can *eventually* end up legal.  If the
-        # player discards gems after going over 10, it becomes legal.
-        return None
     
-    def _card_to_move(self, tier: int, pos: int, variant: str) -> int:
+    def _is_reserve_legal(self) -> bool:
+        return len(self.game.active_player.reserved_cards) < 3
+
+    def _is_buy_legal(self, card: "Card") -> bool:
+        gems = self.game.active_player.effective_gems
+        return np.all(gems > card.cost).astype(bool)
+
+    @property
+    def discards_required(self) -> int:
         player = self.game.active_player
-
-        match variant:
-            case "buy":
-                return player.take_dim + 2*(tier*4 + pos)
-            case "buy_with_gold":
-                return player.take_dim + 2*(tier*4 + pos) + 1
-            case "reserve":
-                return player.take_dim + player.buy_dim + tier*5 + pos
-            case "buy_reserved":
-                return player.take_dim + 24 + pos*2  # indices may need validated?
-            case "buy_reserved_with_gold":
-                return player.take_dim + 24 + pos*2 + 1
-
-        raise ValueError("Error: no legal card move_idx was found.")
+        n_picked = len(self._picked_gems)
+        n_discarded = len(self._discarded_gems)
+        return max(0, player.gems.sum() + n_picked - n_discarded - 10)
 
     def _handle_board_click(self, mouse_x, mouse_y, button: int) -> None:
         for rect, token in reversed(list(self.clickmap.items())):
             if rect.contains(mouse_x, mouse_y):
                 # Right click unfocuses any card
-                if button == 3 and token[0] != "gem":
+                if button == 3:
                     self._focus_target = None
-                    break
+                    if not token[0].endswith("gem"):
+                        break
+                
+                # Clicking gems unfocuses cards and vice-versa
+                if button == 1 and token[0].endswith("gem"):
+                    self._focus_target = None
+                elif button == 1 and token[0].endswith("card"):
+                    self._picked_gems.clear()
+                    self._discarded_gems.clear()
 
+                # Now apply click logic
                 if token[0] == "board_card":
                     clicked_target = FocusTarget.from_index(*token[1:])
-                    self._picked_tokens.clear()
                     self._focus_target = clicked_target
                 elif token[0] == "reserved_card":
-                    self._picked_tokens.clear()
                     reserve_idx = token[1]
                     self._focus_target = FocusTarget("reserved", reserve_idx=reserve_idx)
-                elif token[0] == "gem":
-                    # Add/remove token based on l/r click
+                elif token[0] == "board_gem":
+                    # Add/remove gem based on l/r click
                     color = token[1]
-                    if button == 3 and color in self._picked_tokens:
-                        self._picked_tokens.remove(color)
-                    elif button == 1 and self._gem_click_allowed(color):
-                        self._focus_target = None
-                        self._picked_tokens.append(color)
+                    if button == 3 and color in self._picked_gems:
+                        self._picked_gems.remove(color)
+                    elif button == 1 and self._is_gem_click_allowed(color):
+                        self._picked_gems.append(color)
+                elif token[0] == "player_gem":
+                    # Add/remove gem based on l/r click
+                    color = token[1]
+                    if button == 3 and color in self._discarded_gems:
+                        self._picked_gems.remove(color)
+                    elif button == 1:
+                        # Keep things linear and one-by-one:
+                        if color in self._discarded_gems:
+                            self._discarded_gems.remove(color)
+                        else:
+                            self._discarded_gems.append(color)
 
                 break
     
-    def _handle_context_menu_click(self, payload) -> None:
-        action, move_idx = payload
+    def _handle_context_menu_click(self, payload: tuple[str, GUIMove]) -> None:
+        button_choice, move = payload
 
-        if action == "clear":
+        if button_choice == "clear":
             self._focus_target = None
-        elif action == "confirm" and move_idx is not None:
-            self.human.feed_move(move_idx)
+        elif button_choice == "confirm" and move is not None:
+            self.human.feed_move(move)
             self.lock.arm_delay(self.delay_after_move)
         
         # Reset overlay
         self._focus_target = None
-        self._picked_tokens.clear()
+        self._picked_gems.clear()
+        self._discarded_gems.clear()
         self._ctx_rects.clear()
 
     def _handle_mouse_event(self, event: pygame.event.Event) -> None:
@@ -230,52 +216,75 @@ class SplendorGUI:
             print("unarming lock")
             self._awaiting_ai = False
 
-    def _card_menu_options(self, focus: FocusTarget) -> list[tuple[str, int]]:
-        """Get legal (label, move_idx) pairs for card clicks."""
+    def _card_menu_options(self, focus: FocusTarget) -> list[tuple[str, GUIMove]]:
+        """Get legal (label, move) pairs for card clicks.
+        We do this so we can draw the Confirm/Select button,
+        and keep the legality checking to this one step.
+        """
 
-        legal, p = [], self.game.active_player
+        opts: list[tuple[str, GUIMove]] = []
         match focus.kind:
             case "shop":
-                tier, pos = focus.tier, focus.pos
-                assert tier is not None, "FocusTarget.kind == 'shop' has tier of None"
-                assert pos is not None, "FocusTarget.kind == 'shop' has pos of None"
-                card = self.game.board.cards[tier][pos]
-                for mode in ("buy", "buy_with_gold", "reserve"):
-                    idx = self._card_to_move(tier, pos, mode)
-                    if self._is_move_legal(idx):
-                        legal.append((mode, idx))
+                card = self.game.board.cards[focus.tier][focus.pos]
+                if self._is_buy_legal(card):
+                    move = GUIMove("buy", card=card, source=focus)
+                    opts.append(("Buy 🔵⚪🟤", move))
+                if self._is_reserve_legal():
+                    move = GUIMove("reserve", card=card, source=focus)
+                    opts.append(("Reserve", move))
 
             case "deck":
-                assert focus.tier is not None, \
-                    "FocusTarget.kind == 'deck' has tier of None"
-                idx = self._card_to_move(focus.tier, 4, "reserve")
-                if self._is_move_legal(idx):
-                    legal.append(("reserve", idx))
-                card = None  # unknown top of deck
+                card = self.game.board.deck
+                if self._is_reserve_legal():
+                    move = GUIMove("reserve", card=card, source=focus)
+                    opts.append(("Reserve", move))
 
             case "reserved":
+                p = self.game.active_player
                 card = p.reserved_cards[focus.reserve_idx]
-                for mode in ("buy_reserved", "buy_reserved_with_gold"):
-                    assert focus.reserve_idx is not None, \
-                        "FocusTarget.kind == 'reserved' has reserve_idx of None"
-                    idx = self._card_to_move(0, focus.reserve_idx, mode)  # tier ignored
-                    if self._is_move_legal(idx):
-                        legal.append((mode, idx))
-
-        opts = []
-        for mode, idx in legal:
-            match mode:
-                case "buy" | "buy_reserved":
-                    opts.append(("Buy 🔵⚪🟤", idx))
-                case "buy_with_gold" | "buy_reserved_with_gold":
-                    if card and p.gold_choice_exists(card.cost):
-                        opts.append(("Buy 🪙", idx))
-                    else:
-                        opts.append(("Buy 🔵⚪🪙", idx))
-                case "reserve":
-                    opts.append(("Reserve", idx))
+                if self._is_buy_legal(card):
+                    # I don't know if not having a "buy_reserved" will make things hard later...
+                    move = GUIMove("buy", card=card, source=focus)
+                    opts.append(("Buy 🔵⚪🟤", move))
 
         return opts
+
+    def _get_rewards(self) -> list[str]:
+        """Return RewardEngine previews for current selection/focus."""
+        state = (self._focus_target, tuple(self._picked_gems))
+        if state == self._preview_state:
+            return self._preview_lines
+        else:
+            self._preview_state = state
+        
+        lines: list[str] = []
+        rewards = self.rewards
+        player = self.game.active_player
+
+        # Gems
+        if self._picked_gems:
+            gems_vec = np.zeros(6, dtype=int)
+            for c in self._picked_gems:
+                gems_vec[c] += 1
+            n_discards = self.discards_required
+            lines.append(f"Take gems: {rewards.gems(gems_vec, n_discards):+.2f}")
+
+        # Focused card (buy and reserve)
+        if self._focus_target:
+            ft = self._focus_target
+            if ft.kind == "shop":
+                card = self.game.board.cards[ft.tier][ft.pos]
+                if card:
+                    lines.append(f"Buy: {rewards.buy(card):+.2f}")
+                    gold = np.zeros(6, dtype=int)
+                    gold[5] = int(self.game.board.gems[5] > 0)
+                    lines.append(f"Reserve: {rewards.reserve(card, 0, gold):+.2f}")
+            elif ft.kind == "reserved":
+                card = player.reserved_cards[ft.reserve_idx]
+                lines.append(f"Buy reserved: {rewards.buy(card):+.2f}")
+
+        self._preview_lines = lines
+        return lines
 
     def run(self):
         """Side thread for GUI handling."""
@@ -284,7 +293,7 @@ class SplendorGUI:
             self._renderer.geom.default_canvas_scale, 
             pygame.RESIZABLE
         )
-        self.overlay = OverlayRenderer(self.window)
+        self.overlay = OverlayRenderer(self.window, self.preview_rewards)
         pygame.display.set_caption("Splendor RL - Human vs DDQN")
 
         while self.running and not self.game.victor:
@@ -310,8 +319,13 @@ class SplendorGUI:
 
             # Draw UI
             self.overlay.draw_selection_highlights(
-                self.clickmap, self._focus_target, self._picked_tokens
+                self.clickmap, self._focus_target,
+                self._picked_gems, self._discarded_gems
             )
+            if self.discards_required > 0:
+                self.overlay.draw_discard_notice()
+            if self.preview_rewards:
+                self.overlay.draw_reward_preview(self._get_rewards())
 
             if self._focus_target:
                 # Draw Submit/Clear button and context menu for clicked cards
@@ -347,13 +361,17 @@ class SplendorGUI:
                     self._ctx_rects = self.overlay.draw_card_context_menu(
                         origin, options,
                     )
-            elif self._picked_tokens:
+            elif self._picked_gems:
                 # Draw Submit/Clear button for clicked tokens
-                move_idx = self._gems_to_move(self._picked_tokens)
-                confirm_enabled = self._is_move_legal(move_idx)
-                clear_enabled = bool(self._picked_tokens)
+                move = GUIMove(
+                    kind="take",
+                    take=np.bincount(self._picked_gems, minlength=6)[:6],
+                    discard=np.bincount(self._discarded_gems, minlength=6)[:6]
+                )
+                confirm_enabled = True  # already validated
+                clear_enabled = bool(self._picked_gems)
                 self._ctx_rects = self.overlay.draw_move_confirm_button(
-                    move_idx, confirm_enabled, clear_enabled
+                    move, confirm_enabled, clear_enabled
                 )
             else:
                 self._ctx_rects.clear()

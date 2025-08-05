@@ -2,12 +2,14 @@
 
 from __future__ import annotations
 import numpy as np
+from numpy import ndarray
 import itertools as it
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from .human_agent import HumanAgent
     from RL import InferenceAgent
+    from Play.common_types import GUIMove
 
 
 class Player:
@@ -20,8 +22,8 @@ class Player:
         self._initialize_dimensions()
     
     def reset(self):
-        self.gems: np.ndarray = np.zeros(6, dtype=int)  # Gold gem so 6
-        self.cards: np.ndarray = np.zeros(6, dtype=int)  # Last dim unused but matches 6
+        self.gems: ndarray = np.zeros(6, dtype=int)  # Gold gem so 6
+        self.cards: ndarray = np.zeros(6, dtype=int)  # Last dim unused but matches 6
         self.reserved_cards: list = []
 
         self.card_ids: list = [[] for _ in range(5)]
@@ -29,7 +31,7 @@ class Player:
         self.victor: bool = False
 
     @property
-    def effective_gems(self) -> np.ndarray:
+    def effective_gems(self) -> ndarray:
         return self.gems + self.cards
 
     def _initialize_all_takes(self) -> None:
@@ -85,7 +87,7 @@ class Player:
         self.points += card.points
         self.card_ids[card.gem].append((card.tier, card.id))
 
-    def gold_choice_exists(self, raw_cost: np.ndarray) -> bool:
+    def gold_choice_exists(self, raw_cost: ndarray) -> bool:
         """Don't make the human player select gems if 
         there is only one option for spending anyway.
         If a choice exists they must always choose manually.
@@ -94,12 +96,7 @@ class Player:
         shortage = np.maximum(required - self.gems[:5], 0).sum()
         return self.gems[5] > shortage
 
-    def manual_spend(self, spent_gems) -> np.ndarray:
-        # Return spent_gems so the board can update as well
-        self.gems -= spent_gems
-        return spent_gems
-
-    def auto_spend(self, raw_cost, with_gold) -> np.ndarray:
+    def auto_spend(self, raw_cost: ndarray, with_gold: bool) -> ndarray:
         """For now, random spend logic.  Modifies player gems 
         IN PLACE.  Also ENSURE that this and other methods 
         receive .copy() objects, as this does modify card_cost.
@@ -120,7 +117,7 @@ class Player:
         self.gems -= spent_gems
         return spent_gems
 
-    def auto_take(self, gems_to_take) -> tuple[np.ndarray, int]:
+    def auto_take(self, gems_to_take: ndarray) -> tuple[ndarray, int]:
         """Add gems_to_take to self.gems, and if discards are
         needed try to discard gems that weren't taken (avoids 
         combinatorial discard space and does not significantly 
@@ -164,7 +161,7 @@ class Player:
 
         return net_take, n_discards
 
-    def _get_legal_takes(self, board_gems) -> np.ndarray:
+    def _get_legal_takes(self, board_gems: ndarray) -> ndarray:
         """For each possible take, there are ||take|| possible
         discards.  Because these are automatically discarded
         there is no combinatorics needed.
@@ -200,7 +197,7 @@ class Player:
 
         return legal_take_mask
 
-    def _can_afford_card(self, card, effective_gems) -> tuple[bool, bool]:
+    def _can_afford_card(self, card, effective_gems: ndarray) -> tuple[bool, bool]:
         # Calculate costs
         gem_difference = card.cost - effective_gems
         gold_needed = np.maximum(gem_difference, 0).sum()
@@ -253,7 +250,7 @@ class Player:
         
         return legal_reserve_mask
 
-    def get_legal_moves(self, board) -> np.ndarray:
+    def get_legal_moves(self, board) -> ndarray:
         legal_take_mask = self._get_legal_takes(board.gems)
         legal_buy_mask = self._get_legal_buys(board.cards)
         legal_reserve_mask = self._get_legal_reserves(board)
@@ -264,7 +261,7 @@ class Player:
 
         return legal_mask
 
-    def choose_move(self, board, state) -> int:
+    def choose_move(self, board, state) -> "int | GUIMove":
         """Note: the only point by which human and AI agent differ."""
         legal_mask = self.get_legal_moves(board)
 
@@ -275,9 +272,9 @@ class Player:
         else:
             # Human call, send in the legal mask
             # Reminder that self.agent is Play/human_agent.py
-            return self.agent.await_move(legal_mask)  # type: ignore
+            return self.agent.await_move()  # type: ignore
 
-    def to_state(self) -> np.ndarray:
+    def to_state(self) -> ndarray:
         """Some overwriting occurs because of the 6-dim vector
         standardization, so note that not all [5] have meaning.
         """
@@ -302,3 +299,10 @@ class Player:
         state_vector[-1] = self.points / 15
 
         return state_vector  # length 47
+
+    def clone(self):
+        clone = Player.__new__(Player)
+        clone.__dict__ = self.__dict__.copy()
+        clone.gems  = self.gems.copy()
+        clone.cards = self.cards.copy()
+        return clone

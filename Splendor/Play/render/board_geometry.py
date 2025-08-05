@@ -13,7 +13,7 @@ class Coord(NamedTuple):
 
 
 class Size(NamedTuple):
-    """Sizes."""
+    """Width and height of Rect."""
     w: int
     h: int
 
@@ -69,15 +69,17 @@ class BoardGeometry:
 
     # Offsets
     deck_offset: Size = Size(25, 0)
-    card_offset: Size = Size(8, 25)
+    board_card_offset: Size = Size(8, 25)
     noble_offset: Size = Size(29, 0)
     board_gem_offset: Size = Size(0, 25)
     board_gem_text_offset: Size = Size(10, 0)
+    player_card_offset: Size = Size(50, 50)
     reserve_offset: Size = Size(50, 66)
 
     # UI elements
     button: Coord = Coord(155, 50)
     confirm_origin: Coord = Coord(500, 1300)
+    reward_origin: Coord = Coord(50, 1420)
 
     # Origins
     gem_origin: Coord = Coord(950, 470)
@@ -85,16 +87,16 @@ class BoardGeometry:
     shop_origin: Coord = Coord(275, 470)
     nobles_origin: Coord = Coord(335, 290)
     player_origins: Tuple[Coord, Coord] = (
-        Coord(1300, 100), 
-        Coord(1300, 850)
+        Coord(1250, 100), 
+        Coord(1250, 850)
     )
     reserve_origins: Tuple[Coord, Coord] = (
-        Coord(2175, 400), 
-        Coord(2175, 1150)
+        Coord(2225, 400), 
+        Coord(2225, 1150)
     )
     move_text_origins: Tuple[Coord, Coord] = (
-        Coord(1300, 10), 
-        Coord(1300, 1400)
+        Coord(1250, 10), 
+        Coord(1250, 1400)
     )
 
     def player_origin(self, pos: int) -> Coord:
