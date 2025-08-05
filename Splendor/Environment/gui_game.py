@@ -2,10 +2,12 @@
 """Mirror of rl_game.py with trimmed functionality."""
 
 import numpy as np
-import time
+from typing import TYPE_CHECKING
 
-from Environment.Splendor_components.Board_components import Board
-from Environment.Splendor_components.Player_components import Player
+from Environment import Board, Player
+from RL import RewardEngine  # type: ignore
+if TYPE_CHECKING:
+    from Play.common_types import GUIMove
 
 
 class GUIGame:
@@ -13,6 +15,7 @@ class GUIGame:
         """Note: rest of init is performed by reset()"""
         self.players = [Player(name, agent, pos) for name, agent, pos in players]
         self.model = model
+        self.rewards = RewardEngine(self)
         self.reset()
     
     def reset(self):
@@ -22,7 +25,7 @@ class GUIGame:
             player.reset()
 
         self.half_turns: int = 0
-        self.move_idx: int = 0
+        self.move_idx: int | None = 0
         self.victor: bool = False
     
     @property
@@ -30,10 +33,13 @@ class GUIGame:
         return self.players[self.half_turns % 2]
 
     def turn(self) -> None:
-        time.sleep(1.5)
-        move_idx = self.active_player.choose_move(self.board, self.to_state())
-        self.move_idx = move_idx
-        self.apply_move(move_idx)
+        move = self.active_player.choose_move(self.board, self.to_state())
+        if isinstance(move, int):
+            self.move_idx = move
+            self.apply_ai_move(move)
+        else:
+            self.move_idx = None
+            self.apply_human_move(move)
 
         assert np.all(self.board.gems >= 0), "Board gems lt0"
         assert np.all(self.board.gems[:5] <= 4), "Board gems gt4"
@@ -42,14 +48,51 @@ class GUIGame:
         
         self.half_turns += 1
 
-    def apply_move(self, move_idx: int) -> None:
-        """Deeply sorry for the magic numbers approach."""
-        print("GUIGame.apply_move: ", move_idx)
+    def apply_human_move(self, move: "GUIMove") -> None:
+        """Handles moves sent from the GUI."""
         player, board = self.active_player, self.board
-        gems_to_take: np.ndarray | None = None
+
+        if move.kind == "take":
+            player.gems += move.take
+            board.gems  -= move.take
+
+            if move.discard is not None:
+                player.gems -= move.discard
+                board.gems  += move.discard
+
+        elif move.kind == "buy":
+            player.gems -= move.spend
+            board.gems += move.spend
+            player.get_bought_card(move.card)
+
+            # End of game check
+            self._check_noble_visit(player)
+            if player.points >= 15:
+                self.victor = player.victor = True
+
+        elif move.kind == "reserve":
+            ft = move.source  # FocusTarget
+            assert ft is not None, "reserve GUIMove has no FocusTarget"
+            if ft.kind == "shop":
+                reserved, gold = board.reserve(ft.tier, ft.pos)
+            else:  # top of deck
+                reserved, gold = board.reserve_from_deck(ft.tier)
+            
+            # Need to use discard so taht auto_take isn't called.
+            # If player reserves with 10 gems, they must have a discard.
+            # need to add this notice to the game.
+            player.reserved_cards.append(reserved)
+            if gold[5]:
+                extra, _ = player.auto_take(gold)
+                board.take_gems(extra)
+
+    def apply_ai_move(self, move_idx: int) -> None:
+        """Deeply sorry for the magic numbers approach."""
+        player, board = self.active_player, self.board
 
         # Take gems moves
         if move_idx < player.take_dim:
+            gems_to_take: np.ndarray = np.zeros(6)
             if move_idx < 40: # all_takes_3; 10 * 4discards
                 gems_to_take = player.all_takes_3[move_idx // 4]
             elif move_idx < 55: # all_takes_2_same; 5 * 3discards
@@ -66,6 +109,7 @@ class GUIGame:
 
             taken_gems, _ = player.auto_take(gems_to_take)
             board.take_gems(taken_gems)
+            
             return
 
         # Buy card moves
@@ -79,12 +123,8 @@ class GUIGame:
                 bought_card = player.reserved_cards.pop(card_index)
 
             # Spend the tokens
-            if getattr(player.agent, "pending_spend", None):
-                spent_gems = player.manual_spend(player.agent.pending_spend)  # type: ignore
-                player.agent.pending_spend = None  # type: ignore
-            else:
-                with_gold = move_idx % 2  # All odd indices are gold spends
-                spent_gems = player.auto_spend(bought_card.cost, with_gold=with_gold)  # type: ignore
+            with_gold = move_idx % 2  # All odd indices are gold spends
+            spent_gems = player.auto_spend(bought_card.cost, with_gold=with_gold)  # type: ignore
 
             board.return_gems(spent_gems)
             player.get_bought_card(bought_card)
@@ -95,6 +135,7 @@ class GUIGame:
             if player.points >= 15:
                 self.victor = True
                 player.victor = True
+
             return
         
         # Reserve card moves
@@ -112,6 +153,7 @@ class GUIGame:
             if gold[5]:
                 discard_if_gt10, _ = player.auto_take(gold)
                 board.take_gems(discard_if_gt10)
+
             return
 
     def _check_noble_visit(self, player) -> None:

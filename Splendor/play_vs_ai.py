@@ -21,9 +21,9 @@ import sys
 import threading
 from pathlib import Path
 
+from Environment import GUIGame
 from Environment.Splendor_components.Player_components import HumanAgent
 from RL import InferenceAgent
-from Play import GUIGame
 from Play.gui_pygame import SplendorGUI
 
 
@@ -48,7 +48,7 @@ def _resolve_model_path(argv: list[str]) -> str:
         "set MODEL_PATH, or drop a *.keras file in RL/trained_agents/"
     )
 
-def play_one_game(model_path: str):
+def play_one_game(model_path: str, preview_rewards: bool = False):
     # Game
     rl_agent = InferenceAgent(model_path)
     human_agent = HumanAgent()
@@ -56,7 +56,7 @@ def play_one_game(model_path: str):
     game = GUIGame(players, rl_agent)
 
     # GUI thread
-    gui = SplendorGUI(game, human_agent)
+    gui = SplendorGUI(game, human_agent, preview_rewards)
     gui_thread = threading.Thread(target=gui.run, daemon=True)
     gui_thread.start()
 
@@ -71,4 +71,4 @@ def play_one_game(model_path: str):
 
 if __name__ == "__main__":
      model_path = _resolve_model_path(sys.argv)
-     play_one_game(model_path)
+     play_one_game(model_path, preview_rewards = True)

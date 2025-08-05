@@ -2,8 +2,8 @@
 
 import numpy as np
 
-from Environment.Splendor_components.Board_components.board import Board
-from Environment.Splendor_components.Player_components.player import Player
+from Environment import Board, Player
+from RL import RewardEngine  # type: ignore
 
 
 class RLGame:
@@ -11,10 +11,8 @@ class RLGame:
         """Note: rest of init is performed by reset()"""
         self.players = [Player(name, agent, pos) for name, agent, pos in players]
         self.model = model
+        self.rewards = RewardEngine(self)
         self.reset()
-        
-        self.discard_penalty: float = -0.1  # Optional signal
-        self.final_reward: float = 5.0
     
     def reset(self):
         self.board = Board()
@@ -29,12 +27,16 @@ class RLGame:
     @property
     def active_player(self):
         return self.players[self.half_turns % 2]
+    
+    @property
+    def inactive_player(self):
+        return self.players[(self.half_turns + 1) % 2]
 
     def turn(self):
         state = self.to_state()
         move_idx = self.active_player.choose_move(self.board, state)
-        self.move_idx = move_idx
-        reward = self.apply_move(move_idx)
+        self.move_idx = move_idx  # type: ignore
+        reward = self.apply_move(move_idx)  # type: ignore
         self.half_turns += 1
 
         assert np.all(self.board.gems >= 0), "Board gems lt0"
@@ -65,17 +67,17 @@ class RLGame:
             elif move_idx < 95:  # all_takes_1; 5 * 2discards
                 gems_to_take = player.all_takes_1[(move_idx-85) // 2]
             else:  # All else is illegal, discard
+                # I don't think this pathway is possible to activate.
                 legal_discards = np.where(player.gems > 0)[0]
                 discard_idx = np.random.choice(legal_discards)
                 player.gems[discard_idx] -= 1
                 board.gems[discard_idx] += 1
-                return self.discard_penalty
+                return -0.2
 
             taken_gems, n_discards = player.auto_take(gems_to_take)
             board.take_gems(taken_gems)
 
-            reward = self.discard_penalty * n_discards
-            return reward
+            return self.rewards.gems(taken_gems, n_discards)
 
         # Buy card moves
         move_idx -= player.take_dim
@@ -96,18 +98,14 @@ class RLGame:
 
             """Noble visit and end-of-game"""
             # Base reward value
-            reward = bought_card.points  # type: ignore
-            reward += 3 * self._check_noble_visit(player)
-
-            # Capping any points past 15
-            original_points = player.points - bought_card.points  # player already got points so need to take them back  # type: ignore
-            reward = min(reward, 15 - original_points)  / 3  # recieve 5 reward over the whole game
+            reward = self.rewards.buy(bought_card)
+            reward += self.rewards.noble(self._check_noble_visit())
 
             if player.points >= 15:
                 self.victor = True
                 player.victor = True
-                reward += self.final_reward
-                self.model.memory[-1][2] -= self.final_reward  # Loser reward
+                reward += self.rewards.game(winner=True)
+                self.model.memory[-1][2] += self.rewards.game(winner=False)  # Loser reward
                 self.model.memory[-1][5] = True  # Mark loser's memory as done
             
             return reward
@@ -131,10 +129,10 @@ class RLGame:
                 discard_if_gt10, n_discards = player.auto_take(gold)
                 board.take_gems(discard_if_gt10)
 
-            reward = self.discard_penalty * n_discards
-            return reward
+            return self.rewards.reserve(reserved_card, n_discards, gold)
 
-    def _check_noble_visit(self, player):
+    def _check_noble_visit(self):
+        player = self.active_player
         visited = 0
         for index, noble in enumerate(self.board.nobles):
             if noble and np.all(player.cards >= noble.cost):

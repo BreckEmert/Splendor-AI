@@ -3,9 +3,11 @@
 import os
 from PIL import Image, ImageDraw, ImageFont
 from io import BytesIO
+from typing import TYPE_CHECKING
 
-from Environment.gui_game import GUIGame
-from Play import ClickMap, ClickToken
+if TYPE_CHECKING:
+    from Environment.gui_game import GUIGame
+    from Play import ClickMap, ClickToken
 from Play.render import BoardGeometry, Rect, Coord
 from Play.render.static_renderer import move_to_text
 
@@ -27,11 +29,11 @@ class BoardRenderer:
         self._canvas: Image.Image
         self.geom = BoardGeometry()
         self.draw: ImageDraw.ImageDraw
-        self._clickmap: ClickMap = {}
-        self.game: GUIGame
+        self._clickmap: "ClickMap" = {}
+        self.game: "GUIGame"
 
     # Public API
-    def render(self, game: GUIGame, buf: BytesIO):
+    def render(self, game: "GUIGame", buf: BytesIO):
         self.game = game
         self._reset_canvas()
 
@@ -66,7 +68,7 @@ class BoardRenderer:
         self.draw = ImageDraw.Draw(self._canvas)
         self._clickmap = {}
 
-    def _mark(self, rect: Rect, payload: ClickToken):
+    def _mark(self, rect: Rect, payload: "ClickToken"):
         """Register a board region as clickable payload."""
         self._clickmap[rect] = payload
 
@@ -118,10 +120,10 @@ class BoardRenderer:
                         Rect.from_size(x, y, *g.card), 
                         ("board_card", tier, position),
                     )
-                x += card_width + g.card_offset.w
+                x += card_width + g.board_card_offset.w
 
             x = g.shop_origin.x
-            y += card_height + g.card_offset.h
+            y += card_height + g.board_card_offset.h
 
     def _draw_reserved_cards(self, player):
         # Reserved cards
@@ -166,11 +168,11 @@ class BoardRenderer:
                 font=self.font,
             )
 
-            # Clickable non‑gold gems
+            # Clickable if not a gold gem
             if gem_index != 5:
                 self._mark(
                     Rect.from_size(gem_x-20, gem_y-15, *g.gem), 
-                    ("gem", gem_index),
+                    ("board_gem", gem_index),
                 )
 
             gem_y += g.gem.y + g.board_gem_offset.h
@@ -192,18 +194,25 @@ class BoardRenderer:
                     (current_x, current_y),
                     gem_image.split()[3],
                 )
+                # Clickable if not a gold gem
+                if gem_index != 5:
+                    self._mark(
+                        Rect.from_size(current_x-20, current_y-15, *g.gem), 
+                        ("player_gem", gem_index),
+                    )
+
                 current_y += int(g.gem.y / 1.7)
 
             # Permanent bought cards
             if gem_index != 5:
-                current_y = start_y + int(g.gem.y * 2.1)
+                current_y = start_y + 200
                 for tier, card_id in player.card_ids[gem_index]:
                     card_path = os.path.join(self.img_root, str(tier), f"{card_id}.jpg")
                     card_image = self._load(card_path, g.card)
                     self._canvas.paste(card_image, (current_x, current_y))
-                    current_y += int(g.card.y / 7)
+                    current_y += g.player_card_offset.h
 
-            current_x += g.card.x + 50
+            current_x += g.card.x + g.player_card_offset.w
             current_y = start_y
 
         # Reserved cards
@@ -214,7 +223,10 @@ class BoardRenderer:
             self._draw_last_move(player)
 
     def _draw_last_move(self, player):
-        """Annotate the board with the last move."""
+        """Annotate the board with the bot's last move."""
+        if not isinstance(self.game.move_idx, int):
+            return
+        
         move_text = move_to_text(self.game.move_idx, player)
         x, y = self.geom.move_text_origin(player.pos)
         self.draw.text((x, y), move_text, fill=(255, 255, 255), font=self.font)
@@ -229,5 +241,5 @@ class BoardRenderer:
         buf.seek(0)
 
     @property
-    def clickmap(self) -> ClickMap:
+    def clickmap(self) -> "ClickMap":
         return self._clickmap.copy()
