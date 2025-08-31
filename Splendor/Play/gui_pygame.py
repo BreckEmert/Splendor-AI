@@ -60,6 +60,7 @@ class SplendorGUI:
         self.running = True
 
         # UI locks
+        self._awaiting_ai = False
         self.delay_after_move: int = 3000
         self.lock = UILock(game, human)
 
@@ -97,19 +98,13 @@ class SplendorGUI:
             return False
         
         # 5. A player can have at most 10 gems.
-        # THIS IS NOT CORRECT - NEED TO IMPLEMENT PLAYER GEMS AS VALID DISCARD CLICKS INSTEAD WHEN THIS FAILS
-        # needs to be updated with if it's a discard click or a board supply click now
-        if self.game.active_player.gems.sum() + len(picked) + 1 > 10:
-            return False
+        # These clicks are allowed, but the Confirm button
+        # will not enable until self.discards_required is 0.
         
         return True
     
     def _is_reserve_legal(self) -> bool:
         return len(self.game.active_player.reserved_cards) < 3
-
-    def _is_buy_legal(self, card: "Card") -> bool:
-        gems = self.game.active_player.effective_gems
-        return np.all(gems > card.cost).astype(bool)
 
     @property
     def discards_required(self) -> int:
@@ -152,7 +147,7 @@ class SplendorGUI:
                     # Add/remove gem based on l/r click
                     color = token[1]
                     if button == 3 and color in self._discarded_gems:
-                        self._picked_gems.remove(color)
+                        self._discarded_gems.remove(color)
                     elif button == 1:
                         # Keep things linear and one-by-one:
                         if color in self._discarded_gems:
@@ -226,7 +221,7 @@ class SplendorGUI:
         match focus.kind:
             case "shop":
                 card = self.game.board.cards[focus.tier][focus.pos]
-                if self._is_buy_legal(card):
+                if self.game.active_player._can_afford_card(card):
                     move = GUIMove("buy", card=card, source=focus)
                     opts.append(("Buy 🔵⚪🟤", move))
                 if self._is_reserve_legal():
@@ -236,13 +231,13 @@ class SplendorGUI:
             case "deck":
                 card = self.game.board.deck
                 if self._is_reserve_legal():
-                    move = GUIMove("reserve", card=card, source=focus)
+                    move = GUIMove("reserve", card=None, source=focus)
                     opts.append(("Reserve", move))
 
             case "reserved":
                 p = self.game.active_player
                 card = p.reserved_cards[focus.reserve_idx]
-                if self._is_buy_legal(card):
+                if self.game.active_player._can_afford_card(card):
                     # I don't know if not having a "buy_reserved" will make things hard later...
                     move = GUIMove("buy", card=card, source=focus)
                     opts.append(("Buy 🔵⚪🟤", move))
@@ -308,15 +303,15 @@ class SplendorGUI:
             )
             self.window.blit(frame, (0, 0))
 
-            # Don't continue if locked
-            if self.lock.active:
-                pygame.display.flip()
-                continue
-
             # pygame events
             for event in pygame.event.get():
                 self._handle_event(event)
 
+            # Don't continue if locked
+            if self.lock.active:
+                pygame.display.flip()
+                continue
+            
             # Draw UI
             self.overlay.draw_selection_highlights(
                 self.clickmap, self._focus_target,
@@ -368,7 +363,7 @@ class SplendorGUI:
                     take=np.bincount(self._picked_gems, minlength=6)[:6],
                     discard=np.bincount(self._discarded_gems, minlength=6)[:6]
                 )
-                confirm_enabled = True  # already validated
+                confirm_enabled = (self.discards_required == 0)
                 clear_enabled = bool(self._picked_gems)
                 self._ctx_rects = self.overlay.draw_move_confirm_button(
                     move, confirm_enabled, clear_enabled

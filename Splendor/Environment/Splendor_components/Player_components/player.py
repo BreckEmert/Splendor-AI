@@ -87,15 +87,6 @@ class Player:
         self.points += card.points
         self.card_ids[card.gem].append((card.tier, card.id))
 
-    def gold_choice_exists(self, raw_cost: ndarray) -> bool:
-        """Don't make the human player select gems if 
-        there is only one option for spending anyway.
-        If a choice exists they must always choose manually.
-        """
-        required = np.maximum(raw_cost[:5] - self.cards[:5], 0)
-        shortage = np.maximum(required - self.gems[:5], 0).sum()
-        return self.gems[5] > shortage
-
     def auto_spend(self, raw_cost: ndarray, with_gold: bool) -> ndarray:
         """For now, random spend logic.  Modifies player gems 
         IN PLACE.  Also ENSURE that this and other methods 
@@ -197,30 +188,26 @@ class Player:
 
         return legal_take_mask
 
-    def _can_afford_card(self, card, effective_gems: ndarray) -> tuple[bool, bool]:
+    def _can_afford_card(self, card) -> tuple[bool, bool]:
         # Calculate costs
-        gem_difference = card.cost - effective_gems
+        gem_difference = card.cost - self.effective_gems
         gold_needed = np.maximum(gem_difference, 0).sum()
 
         # Check if we can afford it
         can_afford = (gold_needed == 0)
-        can_afford_with_gold = (gold_needed <= effective_gems[5])
+        can_afford_with_gold = (gold_needed <= self.effective_gems[5])
 
         return can_afford, can_afford_with_gold
 
     def _get_legal_buys(self, board_cards) -> list:
         legal_buy_mask = []
 
-        # Treat purchased cards as gems
-        effective_gems = self.gems.copy()
-        effective_gems += self.cards
-
         # Buy card
         for tier_index in range(3):
             for card_index in range(4):
                 if board_cards[tier_index][card_index]:
                     card = board_cards[tier_index][card_index]
-                    can_afford, can_afford_with_gold = self._can_afford_card(card, effective_gems)
+                    can_afford, can_afford_with_gold = self._can_afford_card(card)
                     legal_buy_mask.extend([can_afford, can_afford_with_gold])
                 else:
                     legal_buy_mask.extend([False, False])
@@ -229,7 +216,7 @@ class Player:
         for reserve_index in range(3):
             if reserve_index < len(self.reserved_cards):
                 card = self.reserved_cards[reserve_index]
-                can_afford, can_afford_with_gold = self._can_afford_card(card, effective_gems)
+                can_afford, can_afford_with_gold = self._can_afford_card(card)
                 legal_buy_mask.extend([can_afford, can_afford_with_gold])
             else:
                 legal_buy_mask.extend([False, False])
