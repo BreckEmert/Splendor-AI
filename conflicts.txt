@@ -1,1 +1,8 @@
-Splendor/RL/random_model.py
+Splendor/Environment/Splendor_components/Player_components/player.py
+Splendor/Environment/gui_game.py
+Splendor/Play/common_types.py
+Splendor/Play/gui_pygame.py
+Splendor/Play/render/board_geometry.py
+Splendor/Play/render/board_renderer.py
+Splendor/Play/render/overlay_renderer.py
+Splendor/play_vs_ai.py
