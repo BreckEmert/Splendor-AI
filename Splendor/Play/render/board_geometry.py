@@ -69,11 +69,12 @@ class BoardGeometry:
 
     # Offsets
     deck_offset: Size = Size(25, 0)
-    board_card_offset: Size = Size(8, 25)
     noble_offset: Size = Size(29, 0)
+    board_card_offset: Size = Size(8, 25)
     board_gem_offset: Size = Size(0, 25)
     board_gem_text_offset: Size = Size(10, 0)
     player_card_offset: Size = Size(50, 50)
+    player_gem_offset: Size = Size(0, 56)
     reserve_offset: Size = Size(50, 66)
 
     # UI elements

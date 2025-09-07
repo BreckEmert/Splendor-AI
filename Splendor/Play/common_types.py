@@ -36,7 +36,7 @@ class FocusTarget:
 
 @dataclass(frozen=True)
 class GUIMove:
-    kind: Literal["take", "buy", "reserve"]
+    kind: Literal["take", "buy", "buy_choose", "reserve"]
 
     # Gems
     take: "ndarray | None" = None

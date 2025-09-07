@@ -35,17 +35,17 @@ class UILock:
     def __init__(self, game, human):
         self._game = game
         self._human = human
-        self._locked_until: int | None = None  # in ms
+        self.locked_until: int | None = None  # in ms
 
     @property
     def active(self) -> bool:
         now = pygame.time.get_ticks()
         awaiting_move = getattr(self._human, "awaiting_move", False)
-        human_pause = self._locked_until is not None and now < self._locked_until
+        human_pause = self.locked_until is not None and now < self.locked_until
         return human_pause or not awaiting_move
 
     def arm_delay(self, ms: int) -> None:
-        self._locked_until = pygame.time.get_ticks() + ms
+        self.locked_until = pygame.time.get_ticks() + ms
 
 
 class SplendorGUI:
@@ -70,14 +70,22 @@ class SplendorGUI:
 
         # State
         self._focus_target: FocusTarget | None = None
-        self._picked_gems: list[int] = []
-        self._discarded_gems: list[int] = []
+        self._take_picks: list[int] = []
+        self._take_discards: list[int] = []
         self._ctx_rects = {}  # maps overlay button to a move_idx
+        self._spend_state = None  # Context for when player manually spends
+
+    def _reset_overlay_inputs(self):
+        self._focus_target = None
+        self._take_picks.clear()
+        self._take_discards.clear()
+        self._ctx_rects.clear()
+        self._spend_state = None
 
     def _is_gem_click_allowed(self, color: int) -> bool:
         """Click is allowed if 4 Splendor rules pass."""
         supply = self.game.board.gems[color]
-        picked = self._picked_gems
+        picked = self._take_picks
 
         # 1. Max three picks total (two for taking two of the same).
         if len(picked) >= 3:
@@ -108,12 +116,31 @@ class SplendorGUI:
 
     @property
     def discards_required(self) -> int:
+        # Move this to the HumanAgent class?
         player = self.game.active_player
-        n_picked = len(self._picked_gems)
-        n_discarded = len(self._discarded_gems)
+        n_picked = len(self._take_picks)
+        n_discarded = len(self._take_discards)
         return max(0, player.gems.sum() + n_picked - n_discarded - 10)
 
+    @staticmethod
+    def compute_spend(card_cost, player) -> np.ndarray:
+        card_cost = np.maximum(card_cost - player.cards, 0)
+        spent_gems = np.minimum(player.gems, card_cost)
+        remainder = card_cost.sum() - spent_gems.sum()
+        spent_gems[5] = min(remainder, player.gems[5])
+        return spent_gems
+    
     def _handle_board_click(self, mouse_x, mouse_y, button: int) -> None:
+        # Spend-selection mode; only accept player_gem clicks
+        if self._spend_state:
+            for rect, token in reversed(list(self.clickmap.items())):
+                if rect.contains(mouse_x, mouse_y):
+                    if token[0] == "player_gem":
+                        self._handle_spend_click(token[1], button)
+                    break
+            return
+
+        # Normal mode
         for rect, token in reversed(list(self.clickmap.items())):
             if rect.contains(mouse_x, mouse_y):
                 # Right click unfocuses any card
@@ -126,51 +153,68 @@ class SplendorGUI:
                 if button == 1 and token[0].endswith("gem"):
                     self._focus_target = None
                 elif button == 1 and token[0].endswith("card"):
-                    self._picked_gems.clear()
-                    self._discarded_gems.clear()
+                    self._take_picks.clear()
+                    self._take_discards.clear()
 
                 # Now apply click logic
-                if token[0] == "board_card":
-                    clicked_target = FocusTarget.from_index(*token[1:])
-                    self._focus_target = clicked_target
-                elif token[0] == "reserved_card":
-                    reserve_idx = token[1]
-                    self._focus_target = FocusTarget("reserved", reserve_idx=reserve_idx)
-                elif token[0] == "board_gem":
+                kind = token[0]
+                if kind == "board_card":
+                    self._focus_target = FocusTarget.from_index(*token[1:])
+                elif kind == "reserved_card":
+                    self._focus_target = FocusTarget("reserved", reserve_idx=token[1])
+                elif kind == "board_gem":
                     # Add/remove gem based on l/r click
                     color = token[1]
-                    if button == 3 and color in self._picked_gems:
-                        self._picked_gems.remove(color)
+                    if button == 3 and color in self._take_picks:
+                        self._take_picks.remove(color)
                     elif button == 1 and self._is_gem_click_allowed(color):
-                        self._picked_gems.append(color)
-                elif token[0] == "player_gem":
+                        self._take_picks.append(color)
+                elif kind == "player_gem":
+                    if self._spend_state is None and self.discards_required == 0:
+                        break
+
                     # Add/remove gem based on l/r click
                     color = token[1]
-                    if button == 3 and color in self._discarded_gems:
-                        self._discarded_gems.remove(color)
+                    if button == 3 and color in self._take_discards:
+                        self._take_discards.remove(color)
                     elif button == 1:
                         # Keep things linear and one-by-one:
-                        if color in self._discarded_gems:
-                            self._discarded_gems.remove(color)
+                        if color in self._take_discards:
+                            self._take_discards.remove(color)
                         else:
-                            self._discarded_gems.append(color)
+                            self._take_discards.append(color)
 
                 break
     
     def _handle_context_menu_click(self, payload: tuple[str, GUIMove]) -> None:
+        print("Handling context menu click.")
         button_choice, move = payload
 
         if button_choice == "clear":
-            self._focus_target = None
-        elif button_choice == "confirm" and move is not None:
+            ss = self._spend_state
+            if ss is not None:
+                if ss["spend"].sum():
+                    ss["spend_picks"].clear()
+                    ss["spend"][:] = 0
+                else:
+                    self._spend_state = None
+            elif self._focus_target is not None:
+                self._focus_target = None
+                self._ctx_rects.clear()
+            else:
+                self._reset_overlay_inputs()
+            return
+        
+        if button_choice == "confirm" and move is not None:
+            if move.kind == "buy_choose":
+                self._start_spend_mode(move.source, move.card)
+                return
+            
+            # Take, buy, reserve, or buy with chosen spend
             self.human.feed_move(move)
             self.lock.arm_delay(self.delay_after_move)
-        
-        # Reset overlay
-        self._focus_target = None
-        self._picked_gems.clear()
-        self._discarded_gems.clear()
-        self._ctx_rects.clear()
+            self._reset_overlay_inputs()
+            return
 
     def _handle_mouse_event(self, event: pygame.event.Event) -> None:
         mouse_x, mouse_y = event.pos
@@ -217,36 +261,93 @@ class SplendorGUI:
         and keep the legality checking to this one step.
         """
 
+        p = self.game.active_player
         opts: list[tuple[str, GUIMove]] = []
         match focus.kind:
             case "shop":
                 card = self.game.board.cards[focus.tier][focus.pos]
-                if self.game.active_player._can_afford_card(card):
-                    move = GUIMove("buy", card=card, source=focus)
-                    opts.append(("Buy 🔵⚪🟤", move))
+                afford_wo_gold, afford_with_gold = p.can_afford_card(card)
+                if afford_wo_gold or afford_with_gold:
+                    if afford_with_gold and p.gold_choice_exists(card):
+                        # Allow for manually spending gems
+                        move = GUIMove("buy_choose", card=card, source=focus)
+                        opts.append(("Buy (mnl)", move))
+                    
+                    # Always offer an auto-spend option
+                    spend = self.compute_spend(card.cost, p)
+                    move = GUIMove("buy", card=card, source=focus, spend=spend)
+                    opts.append(("Buy (auto)", move))
+
                 if self._is_reserve_legal():
                     move = GUIMove("reserve", card=card, source=focus)
                     opts.append(("Reserve", move))
 
             case "deck":
-                card = self.game.board.deck
                 if self._is_reserve_legal():
                     move = GUIMove("reserve", card=None, source=focus)
                     opts.append(("Reserve", move))
 
             case "reserved":
-                p = self.game.active_player
                 card = p.reserved_cards[focus.reserve_idx]
-                if self.game.active_player._can_afford_card(card):
-                    # I don't know if not having a "buy_reserved" will make things hard later...
-                    move = GUIMove("buy", card=card, source=focus)
-                    opts.append(("Buy 🔵⚪🟤", move))
+                afford_wo_gold, afford_with_gold = p.can_afford_card(card)
+                if afford_wo_gold or afford_with_gold:
+                    if afford_with_gold and p.gold_choice_exists(card):
+                        # Allow for manually spending gems
+                        move = GUIMove("buy_choose", card=card, source=focus)
+                        opts.append(("Buy (mnl)", move))
+                    
+                    # Always offer an auto-spend option
+                    spend = self.compute_spend(card.cost, p)
+                    move = GUIMove("buy", card=card, source=focus, spend=spend)
+                    opts.append(("Buy (auto)", move))
 
         return opts
 
+    def _start_spend_mode(self, focus, card) -> None:
+        """Engaged when player will start choosing gems to spend."""
+        p = self.game.active_player
+        cost = np.maximum(card.cost - p.cards, 0)
+        self._spend_state = {
+            "focus": focus,
+            "card": card,
+            "cost": cost,
+            "colored_max": np.minimum(p.gems[:5], cost[:5]).astype(int),
+            "gold_max": int(min(p.gems[5], cost[:5].sum())),
+            "spend_picks": [],
+            "spend": np.zeros(6, dtype=int),
+        }
+        self._take_picks.clear()
+        self._take_discards.clear()
+        self._focus_target = focus  # keep the yellow outline on the card
+
+    def _handle_spend_click(self, color: int, button: int) -> None:
+        ss = self._spend_state
+        if not ss or button not in (1,3):
+            return
+
+        # --- one-by-one clickstream (mirror of take-picks) ---------------------
+        picks = ss["spend_picks"]
+        need = ss["cost"][:5].sum()  # colored need only
+        used = np.bincount(picks, minlength=6)[:6]
+        total = used[:5].sum() + used[5]
+        cap = ss["colored_max"][color] if color < 5 else ss["gold_max"]
+
+        if button == 1:
+            # Add one if under the need
+            if used[color] < cap and total < need:
+                picks.append(color)
+        else:
+            # Remove one on right click
+            for i in range(len(picks) - 1, -1, -1):
+                if picks[i] == color:
+                    picks.pop(i)
+                    break
+
+        ss["spend"][:] = np.bincount(picks, minlength=6)[:6]
+
     def _get_rewards(self) -> list[str]:
         """Return RewardEngine previews for current selection/focus."""
-        state = (self._focus_target, tuple(self._picked_gems))
+        state = (self._focus_target, tuple(self._take_picks))
         if state == self._preview_state:
             return self._preview_lines
         else:
@@ -257,9 +358,9 @@ class SplendorGUI:
         player = self.game.active_player
 
         # Gems
-        if self._picked_gems:
+        if self._take_picks:
             gems_vec = np.zeros(6, dtype=int)
-            for c in self._picked_gems:
+            for c in self._take_picks:
                 gems_vec[c] += 1
             n_discards = self.discards_required
             lines.append(f"Take gems: {rewards.gems(gems_vec, n_discards):+.2f}")
@@ -315,14 +416,30 @@ class SplendorGUI:
             # Draw UI
             self.overlay.draw_selection_highlights(
                 self.clickmap, self._focus_target,
-                self._picked_gems, self._discarded_gems
+                self._take_picks, self._take_discards,
+                self._spend_state["spend"] if self._spend_state else [0]*6
             )
             if self.discards_required > 0:
                 self.overlay.draw_discard_notice()
             if self.preview_rewards:
                 self.overlay.draw_reward_preview(self._get_rewards())
 
-            if self._focus_target:
+            if self._spend_state:
+                # Draw confirm when selected gems equals the cost
+                state = self._spend_state
+                need = state["cost"][:5].sum()
+                cur = state["spend"][:5].sum() + state["spend"][5]
+                confirm_enabled = (cur == need)
+                move = GUIMove(
+                    kind="buy",
+                    card=state["card"],
+                    source=state["focus"],
+                    spend=state["spend"].copy(),
+                )
+                self._ctx_rects = self.overlay.draw_move_confirm_button(
+                    move, confirm_enabled, clear_enabled=True
+                )
+            elif self._focus_target:
                 # Draw Submit/Clear button and context menu for clicked cards
                 options = self._card_menu_options(self._focus_target)
                 origin = None
@@ -339,16 +456,14 @@ class SplendorGUI:
                     case "deck":
                         origin = next(
                             (Coord(r.x0, r.y0) for r, p in self.clickmap.items()
-                             if p == ("board_card",
-                                      self._focus_target.tier,
-                                      4)),
+                             if p == ("board_card", self._focus_target.tier, 4)),
                             None,
                         )
                     case "reserved":
                         origin = next(
                             (Coord(r.x0, r.y0) for r, p in self.clickmap.items()
                              if p[0] == "reserved_card"
-                                and p[1] == self._focus_target.reserve_idx),
+                             and p[1] == self._focus_target.reserve_idx),
                             None,
                         )
 
@@ -356,15 +471,15 @@ class SplendorGUI:
                     self._ctx_rects = self.overlay.draw_card_context_menu(
                         origin, options,
                     )
-            elif self._picked_gems:
+            elif self._take_picks:
                 # Draw Submit/Clear button for clicked tokens
                 move = GUIMove(
                     kind="take",
-                    take=np.bincount(self._picked_gems, minlength=6)[:6],
-                    discard=np.bincount(self._discarded_gems, minlength=6)[:6]
+                    take=np.bincount(self._take_picks, minlength=6)[:6],
+                    discard=np.bincount(self._take_discards, minlength=6)[:6]
                 )
                 confirm_enabled = (self.discards_required == 0)
-                clear_enabled = bool(self._picked_gems)
+                clear_enabled = bool(self._take_picks)
                 self._ctx_rects = self.overlay.draw_move_confirm_button(
                     move, confirm_enabled, clear_enabled
                 )

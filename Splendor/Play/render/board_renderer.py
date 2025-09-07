@@ -178,6 +178,7 @@ class BoardRenderer:
             gem_y += g.gem.y + g.board_gem_offset.h
 
     def _draw_player(self, player):
+        """Draws images and marks clickable areas for player stuffs."""
         # Gems and owned cards
         g = self.geom
         start_x, start_y = g.player_origin(player.pos)
@@ -194,18 +195,18 @@ class BoardRenderer:
                     (current_x, current_y),
                     gem_image.split()[3],
                 )
-                # Clickable if not a gold gem
-                if gem_index != 5:
-                    self._mark(
-                        Rect.from_size(current_x-20, current_y-15, *g.gem), 
-                        ("player_gem", gem_index),
-                    )
-
-                current_y += int(g.gem.y / 1.7)
+                current_y += g.player_gem_offset.h
+            
+            if player is self.game.active_player:
+                pile_h = g.gem.y + g.player_gem_offset.h * max(gem_count - 1, 0)
+                self._mark(  # Only one clickable big rect for the gems
+                    Rect.from_size(current_x, start_y, g.gem.x, pile_h), 
+                    ("player_gem", gem_index),
+                )
 
             # Permanent bought cards
             if gem_index != 5:
-                current_y = start_y + 200
+                current_y = start_y + g.card.y
                 for tier, card_id in player.card_ids[gem_index]:
                     card_path = os.path.join(self.img_root, str(tier), f"{card_id}.jpg")
                     card_image = self._load(card_path, g.card)

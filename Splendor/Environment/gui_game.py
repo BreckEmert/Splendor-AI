@@ -69,9 +69,18 @@ class GUIGame:
                 board.gems  += move.discard
 
         elif move.kind == "buy":
+            ft = move.source
+            assert ft is not None, "buy GUIMove has no FocusTarget"
+
+            if ft.kind == "shop":
+                bought = self.board.take_card(ft.tier, ft.pos)
+            else:  # reserved
+                assert ft.reserve_idx is not None, "reserve ft has no reserve_index"
+                bought = player.reserved_cards.pop(ft.reserve_idx)
+
             player.gems -= move.spend
-            board.gems += move.spend
-            player.get_bought_card(move.card)
+            self.board.return_gems(move.spend)
+            player.get_bought_card(bought)
 
             # End of game check
             self._check_noble_visit(player)

@@ -188,16 +188,33 @@ class Player:
 
         return legal_take_mask
 
-    def _can_afford_card(self, card) -> tuple[bool, bool]:
+    def can_afford_card(self, card) -> tuple[bool, bool]:
         # Calculate costs
         gem_difference = card.cost - self.effective_gems
         gold_needed = np.maximum(gem_difference, 0).sum()
 
         # Check if we can afford it
-        can_afford = (gold_needed == 0)
-        can_afford_with_gold = (gold_needed <= self.effective_gems[5])
+        afford_wo_gold = (gold_needed == 0)
+        afford_with_gold = (gold_needed <= self.effective_gems[5])
 
-        return can_afford, can_afford_with_gold
+        return afford_wo_gold, afford_with_gold
+
+    def gold_choice_exists(self, card) -> bool:
+        cost = np.maximum(card.cost - self.cards, 0)
+        colored_cost = cost[:5].sum()
+        colored_pay = np.minimum(self.gems[:5], cost[:5]).sum()
+        gold_needed = colored_cost - colored_pay
+
+        # No payment required, so no choice to use gold
+        if colored_cost == 0:
+            return False
+
+        # Gold isn't required but we have gold
+        if gold_needed == 0:
+            return self.gems[5] > 0
+
+        # Gold is required but we have surplus
+        return self.gems[5] > gold_needed
 
     def _get_legal_buys(self, board_cards) -> list:
         legal_buy_mask = []
@@ -207,8 +224,8 @@ class Player:
             for card_index in range(4):
                 if board_cards[tier_index][card_index]:
                     card = board_cards[tier_index][card_index]
-                    can_afford, can_afford_with_gold = self._can_afford_card(card)
-                    legal_buy_mask.extend([can_afford, can_afford_with_gold])
+                    afford_wo_gold, afford_with_gold = self.can_afford_card(card)
+                    legal_buy_mask.extend([afford_wo_gold, afford_with_gold])
                 else:
                     legal_buy_mask.extend([False, False])
 
@@ -216,8 +233,8 @@ class Player:
         for reserve_index in range(3):
             if reserve_index < len(self.reserved_cards):
                 card = self.reserved_cards[reserve_index]
-                can_afford, can_afford_with_gold = self._can_afford_card(card)
-                legal_buy_mask.extend([can_afford, can_afford_with_gold])
+                afford_wo_gold, afford_with_gold = self.can_afford_card(card)
+                legal_buy_mask.extend([afford_wo_gold, afford_with_gold])
             else:
                 legal_buy_mask.extend([False, False])
 

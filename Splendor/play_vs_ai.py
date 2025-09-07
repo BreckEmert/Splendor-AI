@@ -20,6 +20,7 @@ import os
 import sys
 import threading
 from pathlib import Path
+import pygame
 
 from Environment import GUIGame
 from Environment.Splendor_components.Player_components import HumanAgent
@@ -62,6 +63,11 @@ def play_one_game(model_path: str, preview_rewards: bool = False):
 
     # Game loop
     while not game.victor and gui.running:
+        if gui.lock.locked_until:
+            remaining = gui.lock.locked_until - pygame.time.get_ticks()
+            if remaining > 0:
+                pygame.time.wait(remaining)
+
         game.turn()
 
     if gui.running:
