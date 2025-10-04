@@ -32,6 +32,10 @@ class GUIGame:
     def active_player(self):
         return self.players[self.half_turns % 2]
 
+    @property
+    def inactive_player(self):
+        return self.players[(self.half_turns + 1) % 2]
+    
     def turn(self) -> None:
         move = self.active_player.choose_move(self.board, self.to_state())
         if isinstance(move, int):
@@ -49,7 +53,11 @@ class GUIGame:
         self.half_turns += 1
 
     def apply_human_move(self, move: "GUIMove") -> None:
-        """Handles moves sent from the GUI."""
+        """Handles moves sent from the GUI.
+        Note that these moves are always complete, with
+        full spend information needed to not require any
+        _auto method or calculation.
+        """
         player, board = self.active_player, self.board
 
         if move.kind == "take":
@@ -61,9 +69,18 @@ class GUIGame:
                 board.gems  += move.discard
 
         elif move.kind == "buy":
+            ft = move.source
+            assert ft is not None, "buy GUIMove has no FocusTarget"
+
+            if ft.kind == "shop":
+                bought = self.board.take_card(ft.tier, ft.pos)
+            else:  # reserved
+                assert ft.reserve_idx is not None, "reserve ft has no reserve_index"
+                bought = player.reserved_cards.pop(ft.reserve_idx)
+
             player.gems -= move.spend
-            board.gems += move.spend
-            player.get_bought_card(move.card)
+            self.board.return_gems(move.spend)
+            player.get_bought_card(bought)
 
             # End of game check
             self._check_noble_visit(player)
@@ -83,8 +100,11 @@ class GUIGame:
             # need to add this notice to the game.
             player.reserved_cards.append(reserved)
             if gold[5]:
-                extra, _ = player.auto_take(gold)
-                board.take_gems(extra)
+                if move.discard:
+                    player.gems -= move.discard
+                    board.gems += move.discard
+                player.gems += gold
+                board.gems -= gold
 
     def apply_ai_move(self, move_idx: int) -> None:
         """Deeply sorry for the magic numbers approach."""

@@ -1,2 +1,0 @@
-Splendor/Play/common_types.py
-Splendor/play_vs_ai.py
