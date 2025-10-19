@@ -17,14 +17,14 @@ class Card:
         self.cost: np.ndarray = np.concatenate((cost, [0]))  # gem costs
 
     def gem_to_one_hot(self, index):
-        one_hot = np.zeros(5, dtype=int)
+        one_hot = np.zeros(6, dtype=int)
         one_hot[index] = 1
         return one_hot
 
     def to_vector(self, effective_gems):
         # Subtracting helps the model learn how far it is from buying
         clipped_cost = np.maximum(self.cost - effective_gems, 0)[:5]
-        return np.concatenate((self.gem_one_hot, [self.points/15], clipped_cost/4))
+        return np.concatenate((self.gem_one_hot[:5], [self.points/15], clipped_cost/4))
     
 
 class Noble:

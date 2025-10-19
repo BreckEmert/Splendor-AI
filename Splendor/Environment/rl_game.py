@@ -3,7 +3,7 @@
 import numpy as np
 
 from Environment import Board, Player
-from RL import RewardEngine  # type: ignore
+from RL import RewardEngine, BasicRewardEngine, SparseRewardEngine
 
 
 class RLGame:
@@ -11,7 +11,7 @@ class RLGame:
         """Note: rest of init is performed by reset()"""
         self.players = [Player(name, agent, pos) for name, agent, pos in players]
         self.model = model
-        self.rewards = RewardEngine(self)
+        self.rewards = SparseRewardEngine(self)
         self.reset()
     
     def reset(self):
@@ -35,14 +35,17 @@ class RLGame:
     def turn(self):
         state = self.to_state()
         move_idx = self.active_player.choose_move(self.board, state)
+        # assert isinstance(move_idx, int), f"move_idx is {type(move_idx)}"
         self.move_idx = move_idx  # type: ignore
+        self.rewards._cache.clear()
         reward = self.apply_move(move_idx)  # type: ignore
+        reward -= self.rewards.constant_penalty
         self.half_turns += 1
 
-        assert np.all(self.board.gems >= 0), "Board gems lt0"
-        assert np.all(self.board.gems[:5] <= 4), "Board gems gt4"
-        assert self.active_player.gems.sum() >= 0, "Player gems lt0"
-        assert self.active_player.gems.sum() <= 10, "Player gems gt10"
+        # assert np.all(self.board.gems >= 0), "Board gems lt0"
+        # assert np.all(self.board.gems[:5] <= 4), "Board gems gt4"
+        # assert self.active_player.gems.sum() >= 0, "Player gems lt0"
+        # assert self.active_player.gems.sum() <= 10, "Player gems gt10"
 
         # Remember
         next_state = self.to_state()
@@ -52,7 +55,7 @@ class RLGame:
                   self.victor]
         self.model.remember(sarsld)
 
-    def apply_move(self, move_idx: int):
+    def apply_move(self, move_idx: int) -> float:
         """Deeply sorry for the magic numbers approach."""
         player, board = self.active_player, self.board
 
@@ -74,10 +77,10 @@ class RLGame:
                 board.gems[discard_idx] += 1
                 return -0.2
 
-            taken_gems, n_discards = player.auto_take(gems_to_take)
+            taken_gems, discards = player.auto_take(gems_to_take)
             board.take_gems(taken_gems)
 
-            return self.rewards.gems(taken_gems, n_discards)
+            return self.rewards.gems(taken_gems, discards)
 
         # Buy card moves
         move_idx -= player.take_dim
@@ -88,9 +91,10 @@ class RLGame:
             else:  # Buy reserved, 3 cards * w&w/o gold
                 card_index = (move_idx-24) // 2
                 bought_card = player.reserved_cards.pop(card_index)
+            # assert bought_card is not None, "bought_card is none inside apply_move buy card moves"
 
             # Player spends the tokens
-            with_gold = move_idx % 2  # All odd indices are gold spends
+            with_gold = bool(move_idx % 2)  # All odd indices are gold spends
             spent_gems = player.auto_spend(bought_card.cost, with_gold=with_gold)  # type: ignore
             board.return_gems(spent_gems)
             
@@ -105,7 +109,7 @@ class RLGame:
                 self.victor = True
                 player.victor = True
                 reward += self.rewards.game(winner=True)
-                self.model.memory[-1][2] += self.rewards.game(winner=False)  # Loser reward
+                self.model.memory[-1][2] += self.rewards.game(winner=False)  # Loser reward (we haven't appended memory yet so -1 is still the loser)
                 self.model.memory[-1][5] = True  # Mark loser's memory as done
             
             return reward
@@ -117,19 +121,19 @@ class RLGame:
             card_index = move_idx % 5
 
             if card_index < 4:  # Reserve from regular tier
-                reserved_card, gold = board.reserve(tier, card_index)  # DO WE NEED RESERVE FOR GOLD REWARD AND RESERVE FOR NOT?
-                # JUST GET STATISTICS ON % TIME RESERVED WHEN AVAILABLE GOLD VS NOT
-                #### ALSO CAN JUST DO ONE RESERVE OPERATION AND CHECK IF CARD INDEX IS 5
+                reserved_card, gold = board.reserve(tier, card_index)
             else:  # Reserve top
                 reserved_card, gold = board.reserve_from_deck(tier)
 
-            n_discards = 0
+            discards = np.zeros(6, dtype=int)
             player.reserved_cards.append(reserved_card)
             if gold[5]:
-                discard_if_gt10, n_discards = player.auto_take(gold)
+                discard_if_gt10, discards = player.auto_take(gold)
                 board.take_gems(discard_if_gt10)
 
-            return self.rewards.reserve(reserved_card, n_discards, gold)
+            return self.rewards.reserve(reserved_card, gold, discards)
+        
+        raise ValueError(f"Illegal move_idx {move_idx}")
 
     def _check_noble_visit(self):
         player = self.active_player
@@ -145,9 +149,9 @@ class RLGame:
         cur_player = self.active_player
         enemy_player = self.players[(self.half_turns+1) % 2]
 
-        board_vector = self.board.to_state(cur_player.effective_gems)        # 157
-        hero_vector = self.active_player.to_state()                          # 47
-        enemy_vector = enemy_player.to_state()                               # 47
+        board_vector = self.board.to_state(cur_player.effective_gems)       # 157
+        hero_vector = self.active_player.to_state()                         # 47
+        enemy_vector = enemy_player.to_state()                              # 47
 
-        vector = np.concatenate((board_vector, hero_vector, enemy_vector))   # 251
+        vector = np.concatenate((board_vector, hero_vector, enemy_vector))  # 251
         return vector.astype(np.float32)

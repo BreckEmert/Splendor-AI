@@ -10,8 +10,9 @@ from random import sample
 
 import tensorflow as tf
 from keras.config import enable_unsafe_deserialization                 
-from keras.layers import Input, Dense, LeakyReLU   
+from keras.layers import Input, Dense, LeakyReLU
 from keras.losses import Huber
+from keras import ops
 from keras.models import load_model
 from keras.initializers import HeNormal
 from keras.optimizers import Adam
@@ -30,13 +31,22 @@ class RLAgent:
         self.batch_size = 512
 
         # DQN
-        self.gamma = 0.93
-        self.gamma_max = 0.995
-        self.gamma_accum = 6e-5
+        # self.gamma = 0.98
+        # # self.gamma = 0.999
+        # self.gamma_max = 0.999
+        # self.gamma_accum = 1.5e-4
+        # Overnight:
+        self.gamma = 1.0
+        self.gamma_max = 1.0
+        self.gamma_accum = 2e-5
 
-        self.epsilon = 0.04
-        self.epsilon_min = 0.005
-        self.epsilon_decay = 0.999_978
+        self.epsilon = 0.002
+        self.epsilon_min = 0.001
+        self.epsilon_decay = 0.99996
+        self.exploration_temp = tf.Variable(0.5, trainable=False, dtype=tf.float32)
+
+        self.tau = 0.001
+        self._target_update_interval = 1
 
         # Initial memory, note batch size/replay_freq is samples per memory
         # 10k/50 = 200 games but memories are correlated as both 
@@ -45,21 +55,44 @@ class RLAgent:
         self.memory = self._load_memory()
 
         # Learning rate
+        # Regular:
+        # lr_schedule = ScheduleWithWarmup(
+        #     warmup_init_lr = 1e-5, 
+        #     decay_init_lr = 8e-4,
+        #     warmup_steps = 500, 
+        #     decay_steps = 20_000, 
+        #     decay_rate = 0.1
+        # )
+        # Finetuning:
+        override_schedule = True
         lr_schedule = ScheduleWithWarmup(
-            warmup_init_lr = 1e-5, 
-            decay_init_lr = 1e-4, 
-            warmup_steps = 3_000, 
-            decay_steps = 100_000, 
-            decay_rate = 0.3
+            warmup_init_lr = 1e-7, 
+            decay_init_lr = 8e-5, 
+            warmup_steps = 4_000, 
+            decay_steps = 30_000, 
+            decay_rate = 0.1
         )
-        self.tau = 0.002
+        # Overnight:
+        # lr_schedule = ScheduleWithWarmup(
+        #     warmup_init_lr = 5e-7,
+        #     decay_init_lr = 1.5e-4,
+        #     warmup_steps = 4_000,
+        #     decay_steps = 50_000,
+        #     decay_rate = 0.5
+        # )
 
         # Model
         model_from_path = paths['model_from_path']
         if model_from_path:
-            print("Loading existing model")
-            self.model: tf.keras.Model = load_model(model_from_path)
-            self.target_model: tf.keras.Model = load_model(model_from_path)
+            if override_schedule:
+                self.model = load_model(model_from_path, compile=False)
+                self.target_model = load_model(model_from_path, compile=False)
+                optimizer = Adam(learning_rate=lr_schedule, clipnorm=1.0)
+                self.model.compile(loss='mse', optimizer=optimizer)
+            else:
+                print("Loading existing model")
+                self.model: tf.keras.Model = load_model(model_from_path)
+                self.target_model: tf.keras.Model = load_model(model_from_path)
         else:
             self.model: tf.keras.Model = self._build_model(lr_schedule)
             self.model._name = "policy_model"
@@ -127,14 +160,13 @@ class RLAgent:
         # Dense
         x = state_input
         for i, layer_size in enumerate(self.paths['layer_sizes']):
-            x = Dense(layer_size, kernel_initializer=HeNormal(), 
-                      name=f'dense{i+1}')(x)
+            x = Dense(layer_size, kernel_initializer=HeNormal(), name=f'dense{i+1}')(x)
             x = LeakyReLU(negative_slope=0.3)(x)
 
-        # Action
-        action = Dense(self.action_dim, activation='linear', 
-                       kernel_initializer=HeNormal(),
-                       name='action')(x)
+        # Dueling heads
+        v = Dense(1, kernel_initializer=HeNormal(), name='value')(x)
+        a = Dense(self.action_dim, kernel_initializer=HeNormal(), name='advantage')(x)
+        action = a - ops.mean(a, axis=1, keepdims=True) + v
         
         # Model
         model = tf.keras.Model(inputs=state_input, outputs=action)
@@ -181,28 +213,41 @@ class RLAgent:
 
         print(f"Wrote {len(memory)} memories to {memory_path}")
 
-    def _update_target_model(self) -> None:
-        """Keeps the target model lagged behind the policy model"""
-        model_weights = self.model.get_weights()
-        target_weights = self.target_model.get_weights()
+    @tf.function
+    def _update_target_model(self):
+        tau = self.tau
+        for v, tv in zip(self.model.trainable_variables,
+                         self.target_model.trainable_variables):
+            tv.assign(tau * v + (1.0 - tau) * tv)
 
-        updated_weights = []
-        for mw, tw in zip(model_weights, target_weights):
-            updated_weights.append(self.tau * mw + (1 - self.tau) * tw)
-
-        self.target_model.set_weights(updated_weights)
+    # @tf.function
+    # def get_predictions(self, state, legal_mask):
+    #     """Returns q-values (random if we explore)"""
+    #     r = tf.random.uniform(())
+    #     qs = tf.cond(
+    #         r <= self.epsilon,
+    #         lambda: tf.random.uniform([self.action_dim]),  # Exploration
+    #         lambda: self.model(state[None, :], training=False)[0]  # Exploitation
+    #     )
+    #     # Set illegal moves' q to -inf
+    #     return tf.where(legal_mask, qs, tf.fill(qs.shape, -tf.float32.max))
 
     @tf.function
     def get_predictions(self, state, legal_mask):
-        """Returns q-values (random if we explore)"""
-        r = tf.random.uniform(())
-        qs = tf.cond(
-            r <= self.epsilon,
-            lambda: tf.random.uniform([self.action_dim]),  # Exploration
-            lambda: self.model(state[None, :], training=False)[0]  # Exploitation
-        )
-        # Set illegal moves' q to -inf
-        return tf.where(legal_mask, qs, tf.fill(qs.shape, -tf.float32.max))
+        def _exploit():
+            q = self.model(state[None, :], training=False)[0]
+            return tf.where(legal_mask, q, tf.fill(tf.shape(q), -1e9))
+
+        def _explore():
+            """Boltzmann sampling"""
+            q = self.model(state[None, :], training=False)[0]
+            q = tf.where(legal_mask, q, tf.fill(tf.shape(q), -1e9))
+            u = tf.random.uniform(tf.shape(q), 1e-6, 1.0 - 1e-6)
+            g = -tf.math.log(-tf.math.log(u))  # Gumbel(0,1)
+            return q / self.exploration_temp + g
+
+        qs = tf.cond(tf.random.uniform(()) <= self.epsilon, _explore, _exploit)
+        return tf.where(legal_mask, qs, tf.fill(tf.shape(qs), -tf.float32.max))
 
     def remember(self, memory) -> None:
         self.memory.append(memory)
@@ -211,9 +256,6 @@ class RLAgent:
     def _batch_train(self, states, actions, rewards, next_states, 
                      legal_masks, dones) -> tuple[tf.Tensor, tf.Tensor]:
         """The sole training function"""
-        # Calculate this turn's qs with primary model
-        qs = self.model(states, training=False)
-
         # Predict next turn's actions with primary model
         next_actions = self.model(next_states, training=False)
         next_actions = tf.where(legal_masks, next_actions, tf.fill(next_actions.shape, -np.inf))
@@ -221,27 +263,29 @@ class RLAgent:
 
         # Calculate next turn's qs with target model
         next_qs = self.target_model(next_states, training=False)
-        actions_indices = tf.stack([tf.range(len(next_actions)), next_actions], axis=1)
-        selected_next_qs = tf.gather_nd(next_qs, actions_indices)
+        next_batch_indices = tf.range(tf.shape(next_actions)[0], dtype=tf.int32)
+        next_actions_indices = tf.stack([next_batch_indices, next_actions], axis=1)
+        selected_next_qs = tf.gather_nd(next_qs, next_actions_indices)
 
-        # Ground qs with reward and value trajectory
-        targets = rewards + (1.0-dones) * self.gamma * selected_next_qs
-        actions_indices = tf.stack([tf.range(len(actions)), actions], axis=1)
-        target_qs = tf.tensor_scatter_nd_update(qs, actions_indices, targets)
+        # Prepare to bootstrap the next state's qs outside of tape
+        # Note this is negamax because both players share one memory
+        targets = rewards - (1.0-dones) * self.gamma * selected_next_qs
+        batch_indices = tf.range(tf.shape(actions)[0], dtype=tf.int32)
+        actions_indices = tf.stack([batch_indices, actions], axis=1)
 
         # Fit
         with tf.GradientTape() as tape:
-            predictions = self.model(states, training=True)
-            loss: tf.Tensor = self.huber(target_qs, predictions)
+            # Calculate this turn's qs with primary model
+            qs = self.model(states, training=True)
+            # Replace chosen actions with target values
+            target_qs = tf.tensor_scatter_nd_update(tf.stop_gradient(qs), actions_indices, targets)
+            loss: tf.Tensor = self.huber(target_qs, qs)
         gradients = tape.gradient(loss, self.model.trainable_variables)
         self.model.optimizer.apply_gradients(zip(gradients, self.model.trainable_variables))
 
         return qs, loss
 
     def _tensorboard(self, states, actions, rewards, qs, loss):
-        """Tensorboard logging.  Always active, but 
-        you can increase the step between logs.
-        """
         step = self.step
 
         with self.tensorboard.as_default():
@@ -259,9 +303,9 @@ class RLAgent:
             # Q-values
             ###################################################################
             folder = "Average Q-Values (normalized by global avg)"
-            legal_qs = tf.where(tf.math.is_finite(qs), qs, tf.zeros_like(qs))  # Removes NaN and inf
-            avg_q = tf.reduce_mean(legal_qs)
-            tf.summary.scalar(f'{folder}/_avg_q', avg_q, step=step)  # Global average q
+            legal_qs = tf.where(tf.math.is_finite(qs), qs, tf.zeros_like(qs))
+            avg_q = tf.reduce_mean(legal_qs)  # Global average q
+            tf.summary.scalar(f'{folder}/_avg_q', avg_q, step=step)
 
             # Q-values of take moves
             ###########################
@@ -350,7 +394,6 @@ class RLAgent:
             tf.summary.scalar('Training Metrics/game lengths', avg, step=self.step)
 
     def replay(self) -> None:
-        """Standard off-policy replay"""
         # Get a batch and convert it to tf.tensors
         batch = sample(self.memory, self.batch_size)
 
@@ -365,7 +408,7 @@ class RLAgent:
         qs, loss = self._batch_train(states, actions, rewards, next_states, legal_masks, dones)
         
         self.step += 1
-        if self.step % 250 == 0:
+        if self.step % 300 == 0:
             self._tensorboard(states, actions, rewards, qs, loss)
         
         # Update DQN parameters
@@ -373,12 +416,90 @@ class RLAgent:
         self.gamma += (self.gamma_max - self.gamma) * self.gamma_accum
         
         # Update target model
-        self._update_target_model()
+        if self.step % self._target_update_interval == 0:
+            self._update_target_model()
 
     def save_model(self) -> None:
         self.model.save(self.paths['model_save_path'])
         print(f"Saved the model at {self.paths['model_save_path']}")
 
+    def _batch_train_two_ply(
+            self, states, actions, rewards, next_states, 
+            legal_masks, dones, 
+            next2_states, next2_legal_masks, next2_valid
+        ) -> tuple[tf.Tensor, tf.Tensor]:
+        """Trying this out as well.  Because we have alternating players
+        in the memory, in order to get classical behavior you have to
+        look ahead two steps to see your own next state.
+        """
+        # Predict next turn's actions with primary model
+        next2_actions = self.model(next2_states, training=False)
+        next2_actions = tf.where(next2_legal_masks, next2_actions, tf.fill(next2_actions.shape, -np.inf))
+        next2_actions = tf.argmax(next2_actions, axis=1, output_type=tf.int32)
+
+        # Calculate next turn's qs with target model
+        next2_qs = self.target_model(next2_states, training=False)
+        next2_batch_indices = tf.range(tf.shape(next2_actions)[0], dtype=tf.int32)
+        next2_actions_indices = tf.stack([next2_batch_indices, next2_actions], axis=1)
+        selected_next2_qs = tf.gather_nd(next2_qs, next2_actions_indices)
+
+        # Prepare to bootstrap the next state's qs outside of tape
+        # Note this is regular max over the next turn (skipped opponent)
+        targets = rewards + next2_valid * self.gamma * selected_next2_qs
+        batch_indices = tf.range(tf.shape(actions)[0], dtype=tf.int32)
+        actions_indices = tf.stack([batch_indices, actions], axis=1)
+
+        # Fit
+        with tf.GradientTape() as tape:
+            # Calculate this turn's qs with primary model
+            qs = self.model(states, training=True)
+            # Replace chosen actions with target values
+            target_qs = tf.tensor_scatter_nd_update(tf.stop_gradient(qs), actions_indices, targets)
+            loss: tf.Tensor = self.huber(target_qs, qs)
+        gradients = tape.gradient(loss, self.model.trainable_variables)
+        self.model.optimizer.apply_gradients(zip(gradients, self.model.trainable_variables))
+
+        return qs, loss
+
+    def replay_two_ply(self) -> None:
+        # Get a batch and convert it to tf.tensors
+        mem = self.memory
+        N = len(mem) - 1
+        idxs = np.random.randint(0, N, size=self.batch_size)
+
+        batch = [mem[i]   for i in idxs]
+        next2 = [mem[i+1] for i in idxs]
+
+        states = tf.convert_to_tensor([m[0] for m in batch], dtype=tf.float32)
+        actions = tf.convert_to_tensor([m[1] for m in batch], dtype=tf.int32)
+        rewards = tf.convert_to_tensor([m[2] for m in batch], dtype=tf.float32)
+        next_states = tf.convert_to_tensor([m[3] for m in batch], dtype=tf.float32)
+        legal_masks = tf.convert_to_tensor([m[4] for m in batch], dtype=tf.bool)
+        dones = tf.convert_to_tensor([m[5] for m in batch], dtype=tf.float32)
+
+        next2_states = tf.convert_to_tensor([m[3] for m in next2], dtype=tf.float32)
+        next2_legal_masks = tf.convert_to_tensor([m[4] for m in next2], dtype=tf.bool)
+        next2_dones = tf.convert_to_tensor([m[5] for m in next2], dtype=tf.float32)
+        next2_valid = 1.0 - tf.maximum(dones, next2_dones)
+
+        # Train and log
+        qs, loss = self._batch_train_two_ply(
+            states, actions, rewards, next_states, 
+            legal_masks, dones, 
+            next2_states, next2_legal_masks, next2_valid
+        )
+        
+        self.step += 1
+        if self.step % 300 == 0:
+            self._tensorboard(states, actions, rewards, qs, loss)
+        
+        # Update DQN parameters
+        self.epsilon -= (self.epsilon - self.epsilon_min) * (1 - self.epsilon_decay)
+        self.gamma += (self.gamma_max - self.gamma) * self.gamma_accum
+        
+        # Update target model
+        if self.step % self._target_update_interval == 0:
+            self._update_target_model()
 
 class ScheduleWithWarmup(tf.keras.optimizers.schedules.LearningRateSchedule):
     def __init__(self, warmup_init_lr, decay_init_lr, 

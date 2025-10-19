@@ -41,6 +41,7 @@ def _resolve_model_path(argv: list[str]) -> str:
     trained_agent_dir = Path(__file__).with_name("RL") / "trained_agents"
     model = trained_agent_dir / "inference_model.keras"
     if model.exists():
+        print(f"Found model at {str(model)}")
         return str(model)
     
     raise SystemExit(

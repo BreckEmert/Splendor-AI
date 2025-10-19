@@ -1,11 +1,13 @@
-# RL/rewards.py
+# Splendor/RL/rewards.py
 
 import numpy as np
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from Environment import RLGame, GUIGame
     from Environment.Splendor_components.Board_components.deck import Card
+
+
+Z6 = np.zeros(6, dtype=int)
 
 """BGA says games average 26.84 turns.
 I'm not sure how to place this for the model (contrary to
@@ -14,7 +16,7 @@ just shouldn't be a true signal - it may be useful somewhere
 but I think things like number of cards purchased is a better
 indicator of how much of the game is remaining.
 """
-AVG_GAME_LENGTH = 26
+AVG_GAME_LENGTH = 26  # Note this is WHOLE turns
 
 """BGA says 12.06/12.40 is loser/winner avg, respectively.
 Given that trend, but also that the model will be worse
@@ -22,7 +24,7 @@ at the game, I'm rounding that up.
 """
 AVG_N_BOUGHT_CARDS = 13
 
-"""ChatGPT: I need you to think about scaling all these rewards.
+"""Need to think about scaling all these rewards.
 Now that we have so many components and indirect sources to get
 rewards, I want to be cautious about drowning out the sparse
 reward, which is necessary to correct for any imperfect math
@@ -37,9 +39,10 @@ give 3.  Something like that?  I don't know if that's the most robust
 approach.  We'd just have to then do math on how many gems will be
 taken over the course of the game and stuff.
 
-According to BGA stats, the winner will get this many:
+According to BGA stats, the winner will get this many gems:
 (.3586*3 + .0367*2 + .1456*1)*26 - 0.82 = ~33
-which is % take 3, % take 2, and % reserve, minus .82 gems discarded
+which is % take 3, % take 2, and % reserve, minus .82 gems discarded.
+Directly from the averages it says 34.04
 
 Or we could just flat out do it based on the % of moves, since
 that may signal where the reward needs to go... my problem with
@@ -56,36 +59,17 @@ to like, estimate that or something?
 
 
 class Metrics:
-    """Somewhere we could add a signal which is controlling gems.
-    I know we have things similar to this:
-    1) We have relinquishing gems as a punishment
-    2) We reward gem takes for controlling the enemy's best cards
-    3) so I guess we just need to turn the reward gem takes into
-        just a constant signal for held cards, rather than specifically
-        what the specific take is.  Don't let me forget to do this ChatGPT!
-    """
-    __slots__ = (
-        "game",
-        "cards_shop_alignment_ema",
-        "gems_shop_alignment_ema",
-        "noble_progress_prev",
-    )
-
     def __init__(self, game):
         self.game = game
-        self.cards_shop_alignment_ema = {p.pos: 0.0 for p in game.players}
-        self.gems_shop_alignment_ema = {p.pos: 0.0 for p in game.players}
-        self.noble_progress_prev = {p.pos: 0.0 for p in game.players}
 
-    def point_reward_efficiency(self, points: int):
+    def point_reward_efficiency(self, player, points: int) -> float:
         """Just switches points into a slightly quadratic return,
         so just the regular 1 point = 1 reward line, but with a
         little bit of sag so later points are worth more.
         """
-        player = self.game.active_player
-        p0 = player.points - points
+        capped_points = player.cap(points)
         f = lambda x: 0.02 * x * x + 0.7 * x
-        return f(p0 + points) - f(p0)
+        return f(player.points + capped_points) - f(player.points)
     
     def gem_reward_efficiency(self):
         """Get the long-term value of a permanent gem discount.
@@ -109,253 +93,240 @@ class Metrics:
         remaining_turns = max(AVG_GAME_LENGTH - current_turn, 1)
         return remaining_turns * gem_usage_rate / 2.6
 
-    def turn_efficiency(self, player, card, shortage=None) -> float:
-        """Computes the relative turn_efficiency (pseudo-point equivalents 
-        per required turn) of obtaining the given card, defined as:
+    def turn_efficiency(self, player, card) -> float:
+        """Computes the relative pseudo-point equivalents per
+        required turn of obtaining the given card, defined as:
 
         1. Immediate victory points from the card converted to equivalent turns saved.
-        2. Future turn savings from the permanent gem discount provided
+        2. Local turn savings from the permanent gem discount provided
+            by this card, looking at what's on the board.
+        3. Future turn savings from the permanent gem discount provided
             by this card, approximating each gem discount's future uses
             as 20% of remaining purchases, scaled by an average gem
             collection rate (≈2.6 tokens per turn).
-        3. Cards without points or gem discounts (rare) default to
-            a baseline pseudo-value of 1.0 for scoring stability.
+        4. Cards without points default to a baseline pseudo-value
+            of 1.0 for scoring stability.
 
         Higher values indicate more points-equivalents saved per turn spent.
         """
-        if shortage is None: shortage = self._shortage(player, card)
-        turns = self._turns(shortage)
+        shortage = self.shortage(player, card)
+        turns = self.turns(shortage)
 
-        turns_from_points = self.point_reward_efficiency(card.points)
-        turns_from_gem = self.gem_reward_efficiency()
+        turns_from_points = self.point_reward_efficiency(player, card.points)
+        turns_from_gem_local = self.reachability_gain(player, card.gem_one_hot)
+        turns_from_gem_longterm = self.gem_reward_efficiency() * 0.5  # TUNABLE
 
-        return (turns_from_points + turns_from_gem) / turns        
-
-    def gem_release_efficiency(self, player, gems: np.ndarray) -> float:
-        """Penalty for releasing gems that complete the
-        opponent's shortages on their top 2 targets.
-        """
-        opp = self.game.players[1 - player.pos]
-        opp_shortages = [
-            shortage for _, shortage, _ in
-            sorted(self.candidate_cards(opp),
-                   key=lambda t: t[2], reverse=True)[:2]
-        ]
-        if not opp_shortages:
-            return 0.0
-
-        # Union of colours the opponent still needs
-        opp_union = np.maximum.reduce(opp_shortages)
-
-        # Gems this buy puts back on the board
-        coloured_spent = np.maximum(gems[:5] - player.cards[:5], 0)
-
-        overlap = float(np.minimum(coloured_spent, opp_union).sum())
-        return 0.02 * overlap
+        return (turns_from_points + turns_from_gem_local + turns_from_gem_longterm) / turns        
 
     # Feasibility -----------------------------------------------------
-    def _shortage(self, player, card):
+    def shortage(self, player, card, extra_gems: np.ndarray | None = None):
         """Color-wise deficit vector after spending gold optimally.
-        No 10-gem overflow check is done here; that is left to the
-        caller.
+        No 10-gem overflow check is done here; that is left to the caller.
         """
-        shortage = np.maximum(card.cost[:5] - player.effective_gems[:5], 0)
-        gold = int(player.gems[5])
+        if extra_gems is None: extra_gems = Z6
+        eff = player.effective_gems[:5].copy() + extra_gems[:5]
+        shortage = np.maximum(card.cost[:5] - eff[:5], 0)
+        gold = int(player.gems[5] + extra_gems[5])
         if gold:
             for idx in np.argsort(-shortage):
                 use = min(gold, shortage[idx])
                 shortage[idx] -= use
                 gold -= use
-                if gold == 0:
-                    break
-        return shortage  # (5,)
+                if gold == 0: break
+        return shortage
 
-    @staticmethod
-    def _turns(shortage):
-        """Coarse temporal cost: ceil(total_missing/3).  It is a
-        lower bound on the number of turns to recieve a card.
-        """
-        return max(1, int(np.ceil(shortage.sum() / 3)))
+    # AI GENERATED FUNCTION:
+    def _net_take_for_card(self, player, delta, card):
+        g0 = player.gems.astype(int)
+        g  = g0.copy() + np.asarray(delta, dtype=int)
+        # Greedy: drop tokens whose removal least increases shortage for this card
+        while g.sum() > 10:
+            best_i, best_up = None, None
+            pre = self.shortage(player, card, g - g0).sum()
+            for i in range(6):
+                if g[i] <= 0: continue
+                g[i] -= 1
+                up = self.shortage(player, card, g - g0).sum() - pre
+                g[i] += 1
+                if best_up is None or up < best_up:
+                    best_up, best_i = up, i
+            g[best_i] -= 1
+        return g - g0  # discard-aware net delta
 
-    def _feasible(self, player, card, shortage=None):
-        """Checks whether the specified card is feasible to
-        acquire within three turns under the current gem conditions.
-
-        A card is feasible if it meets these conditions:
-        1. Requires ≤ 3 gem-collection turns (based on current
-            shortages, assuming up to 3 gems per turn).
-        2. Does not cause the player's total gem count
-            (current + required shortage) to exceed 10 gems.
-        3. Does not require owning all four gems of any single
-            color, as this is really hard to do.
-        """
-        if shortage is None: shortage = self._shortage(player, card)
-        if (card.cost[:5] >= 4).any(): return False
+    def coverage_gain(self, player, card, gems) -> float:
+        """Returns progress towards buying a card given additional gems."""
+        pre_short = self.shortage(player, card)
+        net = self._net_take_for_card(player, gems, card)
+        post_short = self.shortage(player, card, net)
+        total_cost = float(card.cost[:5].sum() or 1)
+        gain = (pre_short.sum() - post_short.sum()) / total_cost
+        return max(0.0, float(gain))
         
-        return self._turns(shortage) <= 3 and (player.gems.sum() + shortage.sum()) <= 10
-
-    def reachable_cards(self, player):
-        """Return up-to-three cards (<= 1 per tier) that can be
-        afforded without violating the 10-gem hand cap right now.
-
-        • Tier-1 -> maximise proportional coverage of cost already paid.
-        • Tier-2/3 -> maximise dot-product between player's
-            effective-gem vector and the card cost vector.
-        • Tie-break by (points desc, residual-shortage asc) for stability.
-        • Skip t1 entirely once the player controls >= 5 permanent gems.
+    def turns(self, shortage):
+        """Lower bound on turns required to purchase a card:
+            - colored need at three per turn
+            - reserving one gold at a time for bank shortfall
         """
-        best = {0: (None, -1), 1: (None, -1), 2: (None, -1)}
+        need = shortage[:5]
+        bank = self.game.board.gems[:5]
+        forced_gold = np.maximum(need - bank, 0).sum()
+        coloured_need = need.sum() - forced_gold
+        n_gem_moves = np.ceil(coloured_need / 3.0) + forced_gold
+        return 1 if n_gem_moves <= 0 else int(n_gem_moves + 1)  # Have to spend a turn buying
 
-        # Get (tier, card) pairs from both board and reserved
-        all_cards = []
-        for tier_idx, tier in enumerate(self.game.board.cards):
-            all_cards.extend((tier_idx, c) for c in tier if c)
-        all_cards.extend((c.tier, c) for c in player.reserved_cards)
+    def _feasibility(self, player, card) -> float:
+        """Downweight a card the more it requires all four gems."""
+        need_after_gold = np.maximum(card.cost[:5] - player.cards[:5] - 1, 0)
+        mx = need_after_gold.max()
+        return 0.7 if mx >= 4 else (0.9 if mx == 3 else 1.0)
 
-        # Evaluate each card for affordability and score
-        for tier, card in all_cards:
-            shortage = self._shortage(player, card)
-            total_gems_after = player.gems.sum() + shortage.sum()
-            if total_gems_after > 10:
-                continue
-
-            cost = card.cost[:5].sum() or 1  # Avoid division by zero
-            covered = cost - shortage.sum()
-
-            if tier == 0:
-                score = covered / cost
-            else:
-                score = player.effective_gems[:5] @ card.cost[:5] / cost
-
-            cand, best_score = best[tier]
-            is_better = score > best_score
-            is_tiebreak = (
-                np.isclose(score, best_score)
-                and card.points > (cand.points if cand else -1)
-            )
-
-            if is_better or is_tiebreak:
-                best[tier] = (card, score)
-
-        # Skip tier 1 if the player controls ≥ 5 permanent gems
-        if player.cards.sum() >= 5:
-            best[0] = (None, -1)
-
-        # Return only the chosen cards, omitting Nones
-        return [c for c, _ in (best[0], best[1], best[2]) if c]
-
-    def feasible_cards(self, player) -> list[tuple["Card", np.ndarray, float]]:
-        """Enumerate every visible shop card that passes the 
-        feasibility test (≤ 3 missing-gem turns and no overflow).
-        Each element is `(card, shortage_vec, efficiency)` with 
-        efficiency computed by `Metrics.turn_efficiency`.
-        The caller decides how to rank them.
+    def _reachable(self, player, card) -> bool:
+        """Return if the card can be afforded, given enough gems,
+        without violating the 10-gem hand cap.  Does allow for
+        discarding irrelevant gems.
         """
-        out=[]
+        g = player.gems.astype(int)
+        if g.sum() <= 10:
+            # Don't use cap to gate reachability when we're at/under cap.
+            # (Affordability and bank constraints are handled elsewhere.)
+            return True
+
+        # When over-cap: keep only what can contribute to this card.
+        need = np.maximum(card.cost[:5] - player.cards[:5], 0)
+        keep_colored = int(np.minimum(g[:5], need).sum())
+        shortfall_after_keep = int(max(0, need.sum() - keep_colored))
+        keep_gold = int(min(g[5], shortfall_after_keep))
+
+        min_kept = keep_colored + keep_gold
+        return min_kept <= 10
+
+    def reachable_cards(self, player) -> list["Card"]:
+        """Plural wrapper for _reachable."""
+        out: list["Card"] = []
         for tier in self.game.board.cards:
             for card in tier:
-                if not card: continue
-                shortage = self._shortage(player, card)
-                if not self._feasible(player, card, shortage): continue
-                eff = self.turn_efficiency(player, card, shortage)
-                out.append((card, shortage, eff))
+                if card and self._reachable(player, card):
+                    out.append(card)
+        for card in player.reserved_cards:
+            if card and self._reachable(player, card):
+                out.append(card)
         return out
 
-    def candidate_cards(self, player) -> list[tuple["Card", np.ndarray, float]]:
-        """Return the set of reachable and feasible cards."""
-        reachable = set(self.reachable_cards(player))
-        feasible = self.feasible_cards(player)
-        candidates: list[tuple["Card", np.ndarray, float]] = [
-            (c, s, eff) for (c, s, eff) in feasible if c in reachable
+    def top_reachable(self, player, k: int = 2) -> list[tuple["Card", float]]:
+        """Filters reachable_cards to just valuable cards."""
+        cache = self.game.rewards._cache
+        key = ("top", id(player),
+                      player.gems.tobytes(),
+                      player.cards.tobytes(),
+                      k)
+        if key in cache:
+            return cache[key]
+
+        cards = self.reachable_cards(player)
+        if not cards:
+            cache[key] = []
+            return []
+        
+        scored = [
+            (c, self.turn_efficiency(player, c) * self._feasibility(player, c))
+            for c in cards
         ]
-        return candidates
+        scored.sort(key=lambda t: t[1], reverse=True)
+
+        top = scored[:k]
+        cache[key] = top
+        return top
+
+    def reachability_gain(self, player, gem_one_hot) -> float:
+        """Measures how much this card's permanent gem improves access
+        to cards that are currently out of reach or inefficient.
+        """
+        cache = self.game.rewards._cache
+        key = ("reach", id(player),
+                        player.gems.tobytes(),
+                        player.cards.tobytes(),
+                        gem_one_hot.tobytes())
+        if key in cache:
+            return cache[key]
+        
+        deltas = []
+        for tier in self.game.board.cards:
+            for card in tier:
+                if card:
+                    deltas.append(self.coverage_gain(player, card, gem_one_hot))
+
+        gain = float(np.mean(deltas)) if deltas else 0.0
+        cache[key] = gain
+        return gain
 
 
-class RewardEngine:
-    def __init__(self, game: "RLGame | GUIGame"):
+class _PlayerView:
+    __slots__ = ("_base","gems","effective_gems","cards","reserved_cards")
+    def __init__(self, base, extra):
+        self._base = base
+        self.gems = base.gems + extra
+        self.effective_gems = base.effective_gems + extra
+        self.cards = base.cards
+        self.reserved_cards = base.reserved_cards
+    def __getattr__(self, name):
+        return getattr(self._base, name)
+
+def _player_with_extra(player, extra):
+    return _PlayerView(player, np.asarray(extra, dtype=int))
+
+
+class BasicRewardEngine:
+    """Basic rewards; only really shapes discards and reserves:
+       - constant step penalty
+       - point value for bought cards (capped to 15)
+       - small discard penalty on token takes / reserves
+       - point value for nobles (3 VP each, capped)
+       - game win/loss bonus
+    """
+    def __init__(self, game):
         self.env = game
         self.metrics = Metrics(game)
-
+        self.constant_penalty = 0.2
+        self._cache = {}
         self.gems = self.GemRewards(self)
         self.buy = self.BuyRewards(self)
         self.reserve = self.ReserveRewards(self)
         self.noble = self.NobleRewards(self)
         self.game = self.GameRewards(self)
 
-    def cap(self, points: int | float) -> float:
-        """Don't send signal for points earned past 15."""
-        player = self.env.active_player
-        prev_pts = player.points - points
-        points_left = max(0, 15 - prev_pts)
-        return float(min(points, points_left))
-
     class GemRewards:
-        def __init__(self, parent):
-            self.parent = parent
+        def __init__(self, parent): self.parent = parent
+        def __call__(self, taken_gems: np.ndarray, discards: np.ndarray) -> float:
+            """All returns are non-positive."""
+            m = self.parent.metrics; p = self.parent.env.active_player
+            bank = m.game.board.gems[:5]
+            count = int(taken_gems.sum())
+            base = 0.1 * float(discards.sum() + np.maximum(0, 3-count))  # effective discards
+            if taken_gems[5]:
+                return -.1 * discards.sum()
 
-        def __call__(self, taken_gems: np.ndarray, n_discards: int) -> float:
-            player = self.parent.env.active_player
-            preplayer = player.clone(); preplayer.gems -= taken_gems
+            bank_colors = int((bank > 0).sum())
+            p_total = int(p.gems.sum())
+            is_double = taken_gems.max() == 2
+            could_take_three = (bank_colors >= 3 and p_total <= 7)
 
-            prealign = self.alignment_reward(preplayer)
-            postalign = self.alignment_reward(player)
-            discard_penalty = float(n_discards) * 0.20
-            return postalign - prealign - discard_penalty
-
-        @staticmethod
-        def coverage(card, shortage):
-            """Considers progress towards buying a card.
-            1) All progress is helpful, but non-bottleneck progress
-                quickly reduces feasibility and often makes unreachable.
-            2) However, this should be covered by those methods?
-                So I'm just going to keep this as shortage diff.
-            """
-            total_cost = card.cost[:5].sum() or 1
-            return 1.0 - shortage.sum() / total_cost
-            
-        def alignment_reward(self, player) -> float:
-            """Continuous reward for a take-gems action.
-
-            Steps:
-            1. reachable = cards theoretically buyable without exceeding 10 gems.
-            2. feasible = cards ≤ 3 gem-collection turns away.
-            3. candidates = reachable & feasible.
-            4. alignment = coverage x efficiency
-                where coverage = 1 - missing_gems / total_cost.
-            5. return mean(top-k alignment), or 0.0 if no candidates.
-            """
-            candidates = self.parent.metrics.candidate_cards(player)
-            if not candidates:
-                return 0.0
-
-            scores = [self.coverage(c, s) * eff for c, s, eff in candidates]
-            scores.sort(reverse=True)
-            return float(np.mean(scores[:2]))
+            if p_total <= 7:  # strongly prefer taking 3, except double-take
+                if count < 3 and could_take_three and not is_double:
+                    return -(0.6 + base)  # unacceptable move
+                else:
+                    return -base  # 3 available and taken or double-take
+            else:
+                return -base  # Best doable, but bad territory
+        def debug_gem_breakdown(self, taken_gems: np.ndarray, discards: np.ndarray): pass
 
     class BuyRewards:
-        # NOTE: needs cap logic for points past 15
-        # Player should recieve _ reward for the 15 points they
-        # will earn throughout their win.
-        # Taken out of rl_game.py:
-        # Capping any points past 15
-        # original_points = player.points - bought_card.points  # player already got points so need to take them back  # type: ignore
-        # reward = min(reward, 15 - original_points)  / 3  # recieve 5 reward over the whole game
-
         def __init__(self, parent): self.parent = parent
-
-        def __call__(self, bought_card):
-            env = self.parent.env
-            player = env.active_player
-            enemy = env.inactive_player
-
-            points_eff = self.parent.cap(bought_card.points)
-            turn_eff = self.parent.metrics.turn_efficiency(player, bought_card)
-            block_eff = self._opportunity_cost(enemy, bought_card)
-            gem_rel_eff = self.parent.metrics.gem_release_efficiency(player, bought_card.cost)
-
-            return points_eff + turn_eff + block_eff - gem_rel_eff
-
-        def _opportunity_cost(self, player, bought_card):
+        def __call__(self, bought_card) -> float:
+           # reward equals VP of the card, capped so we don't exceed 15
+            player = self.parent.env.active_player
+            # return player.cap(float(bought_card.points))
+            return self.parent.metrics.point_reward_efficiency(player, bought_card.points) * .31
+        def opportunity_cost(self, player, bought_card):
             """Returns the difference in value of one card vs. another.
             This serves as card_block_efficiency, as if you buy a card
             you force the opponent to use their gems towards the next
@@ -371,49 +342,154 @@ class RewardEngine:
                 Right now just using 0.85 naively.
             """
             """NOTE: make sure this doesn't get backwards if more than one thing calls this."""
-            opp = self.parent.env.players[1 - player.pos]
-            cands = sorted(
-                self.parent.metrics.candidate_cards(opp),
-                key=lambda t: t[2],
-                reverse=True,
-            )
-            if not cands or cands[0][0] is not bought_card:
+            m = self.parent.metrics
+
+            # Opponent's highest two ranked reachable cards
+            top = m.top_reachable(player, k=2)
+
+            # 1) If the bought card wasn't their top option, opportunity cost is zero.
+            if not top or top[0][0] is not bought_card:
                 return 0.0
 
-            second_best = cands[1][2] if len(cands) > 1 else 0.0
-            delta = cands[0][2] - second_best
-            return 0.85 * delta  # 0.85 is just guestimated risk of a good replacement
+            # 2) Difference between top-1 and top-2 efficiencies (top-2 may not exist).
+            second_best = top[1][1] if len(top) > 1 else 0.0
+            delta = top[0][1] - second_best
+
+            # 3) Damp because the replacement may still be strong.
+            return 0.88 * delta  # 0.88 is just guestimated risk of a good replacement
+        def debug_buy_breakdown(self, *a, **kw): pass
 
     class ReserveRewards:
-        # Takes in the reserved card, n_discards, and bool if they got the gold or not
-        # Speaking of we need to figure out how to fit gold into the gem rewards
-        # I think the only way to set the budget of this is to just run training with
-        # different budgets.  Don't let me forget to try out different budgets if I
-        # ask you how to make the model better!
         def __init__(self, parent): self.parent = parent
+        def __call__(self, reserved_card, gold_vec: np.ndarray, discards: np.ndarray) -> float:
+            p = self.parent.env.active_player
+            opp = self.parent.env.inactive_player
+            block_eff = self.parent.buy.opportunity_cost(opp, reserved_card) * .7
 
-        def __call__(self, reserved_card, n_discards: int, gold_vec: np.ndarray):
-            player = self.parent.env.active_player
-            eff = 0.5 * self.parent.metrics.turn_efficiency(player, reserved_card)
-            gold_bonus = 0.2 if int(gold_vec[5]) else 0.0
-            penalty = 0.2 * n_discards
-            return eff + gold_bonus - penalty
+            p_gold = _player_with_extra(p, gold_vec)  # include the reserved gold in our view
+            anti_block = self.parent.buy.opportunity_cost(p_gold, reserved_card) * .7
+
+            capped = len(self.parent.env.active_player.reserved_cards) == 3
+            capped_penalty = float(capped) * -0.2
+            discard_penalty = self.parent.gems(gold_vec, discards)
+
+            prog = min(1.0, (self.parent.env.half_turns//2)/AVG_GAME_LENGTH)
+            t1_pen = 0.3 if (reserved_card.tier==0 and prog>0.5) else 0.1
+
+            tot = block_eff + anti_block + capped_penalty + discard_penalty - t1_pen
+            return  max(tot - 0.1, -0.6)  # to match bad gem moves at worst case
+        def debug_reserve_breakdown(self, reserved_card, gold_vec: np.ndarray, discards: np.ndarray):
+            p = self.parent.env.active_player
+            opp = self.parent.env.inactive_player
+            block_eff = self.parent.buy.opportunity_cost(opp, reserved_card) * .6
+
+            p_gold = _player_with_extra(p, gold_vec)  # include the reserved gold in our view
+            anti_block = self.parent.buy.opportunity_cost(p_gold, reserved_card) * .6
+
+            capped = len(self.parent.env.active_player.reserved_cards) == 3
+            capped_penalty = float(capped) * -0.2
+            discard_penalty = self.parent.gems(gold_vec, discards)
+            prog = min(1.0, (self.parent.env.half_turns//2)/AVG_GAME_LENGTH)
+            t1_pen = 0.3 if (reserved_card.tier==0 and prog>0.5) else 0.0
+            total = block_eff + anti_block + capped_penalty + discard_penalty - t1_pen
+            print(f"block_eff={block_eff:.3f} anti_block={anti_block:.3f} "
+                  f"capped_penalty={capped_penalty:.3f} "
+                  f"discard_penalty={discard_penalty:.3f} t1_pen={t1_pen} "
+                  f"total={total:.3f}")
 
     class NobleRewards:
-        # NOTE: needs block enemy as well.
-        # NOTE: needs cap logic for points past 15
         def __init__(self, parent): self.parent = parent
-
-        def __call__(self, n_visited: int):
-            # 3 VP per noble, scaled like buy‑card reward
-            points = (n_visited * 3) / 1.0
-            return self.parent.cap(points)
+        def __call__(self, n_visited: int) -> float:
+            # 3 VP per noble, apply same capping logic
+            player = self.parent.env.active_player
+            # return player.cap(3.0 * float(n_visited))
+            # Making this smaller than regular point rewards on purpose:
+            return self.parent.metrics.point_reward_efficiency(player, 3*n_visited) * .26
 
     class GameRewards:
         def __init__(self, parent): self.parent = parent
+        def __call__(self, winner: bool) -> float:
+            return 10.0 if winner else -10.0
 
-        def __call__(self, winner: bool):
-            if winner:
-                return 5
-            else:
-                return -5
+
+class SparseRewardEngine:
+    """Only has game win/loss sparse rewards."""
+    def __init__(self, game):
+        self.env = game
+        self.metrics = Metrics(game)
+        self.constant_penalty = 0.0
+        self._cache = {}
+        self.gems = self.GemRewards(self)
+        self.buy = self.BuyRewards(self)
+        self.reserve = self.ReserveRewards(self)
+        self.noble = self.NobleRewards(self)
+        self.game = self.GameRewards(self)
+
+    class GemRewards:
+        def __init__(self, parent): self.parent = parent
+        def __call__(self, taken_gems, discards): return 0
+        def debug_gem_breakdown(self, *a, **kw): return 0
+
+    class BuyRewards:
+        def __init__(self, parent): self.parent = parent
+        def __call__(self, bought_card): return 0
+        def debug_buy_breakdown(self, *a, **kw): return 0
+
+    class ReserveRewards:
+        def __init__(self, parent): self.parent = parent
+        def __call__(self, reserved_card, gold_vec, discards): return 0
+        def debug_reserve_breakdown(self, *a, **kw): return 0
+
+    class NobleRewards:
+        def __init__(self, parent): self.parent = parent
+        def __call__(self, n_visited): return 0
+
+    class GameRewards:
+        def __init__(self, parent): self.parent = parent
+        def __call__(self, winner: bool) -> float:
+            return 10.0 if winner else -10.0
+
+class SparseReserveRewardEngine:
+    """Sparse plus trying to fix rewards.  I realize the problem now
+    which is that the model can't explore reserving, because at all
+    points it has three reserved cards.  It fills up and then can't
+    learn further.
+
+    Delaying this for now and trying a constant negative penalty of
+    number of held reserved cards to try to dissociate rewards from
+    having three reserved cards.
+    """
+    def __init__(self, game):
+        self.env = game
+        self.metrics = Metrics(game)
+        self.constant_penalty = 0.0
+        self._cache = {}
+        self.gems = self.GemRewards(self)
+        self.buy = self.BuyRewards(self)
+        self.reserve = self.ReserveRewards(self)
+        self.noble = self.NobleRewards(self)
+        self.game = self.GameRewards(self)
+
+    class GemRewards:
+        def __init__(self, parent): self.parent = parent
+        def __call__(self, taken_gems, discards): pass
+        def debug_gem_breakdown(self, *a, **kw): pass
+
+    class BuyRewards:
+        def __init__(self, parent): self.parent = parent
+        def __call__(self, bought_card): pass
+        def debug_buy_breakdown(self, *a, **kw): pass
+
+    class ReserveRewards:
+        def __init__(self, parent): self.parent = parent
+        def __call__(self, reserved_card, gold_vec, discards): pass
+        def debug_reserve_breakdown(self, *a, **kw): pass
+
+    class NobleRewards:
+        def __init__(self, parent): self.parent = parent
+        def __call__(self, n_visited): pass
+
+    class GameRewards:
+        def __init__(self, parent): self.parent = parent
+        def __call__(self, winner: bool) -> float:
+            return 10.0 if winner else -10.0

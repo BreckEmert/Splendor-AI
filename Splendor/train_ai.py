@@ -13,8 +13,7 @@ def get_unique_filename(layer_sizes):
     return f"{timestamp}__{nickname}"
 
 def get_paths(layer_sizes, model_from_name, memory_buffer_name, log_rate):
-    """I use '_dir' for folders and '_path'for things with extensions.
-    """
+    """I use '_dir' for folders and '_path'for things with extensions."""
     backup_dir = os.path.dirname(os.path.abspath(__file__))
     base_dir = os.getenv('WORKSPACE_DIR', backup_dir)
 
@@ -31,7 +30,7 @@ def get_paths(layer_sizes, model_from_name, memory_buffer_name, log_rate):
     images_dir = os.path.join(saved_files_dir, "rendered_games", nickname) if log_rate else None
 
     paths = {
-        "base_dir": base_dir, 
+        "base_dir": base_dir,
         "layer_sizes": layer_sizes,
         "model_from_path": model_from_path, 
         "model_save_path": os.path.join(trained_agents_dir, f"{nickname}.keras"), 
@@ -53,10 +52,10 @@ def get_paths(layer_sizes, model_from_name, memory_buffer_name, log_rate):
     return paths
 
 def main():
-    layer_sizes = [512, 512, 512, 256]
-    model_from_name = None  # "01-25-22-05__256-256.keras"
-    memory_buffer = 'memory.pkl'  # None, 'memory.pkl' ?DOESNT EXIST ANHMORE?:'random_memory.pkl'
-    log_rate = 25_000
+    layer_sizes = [512, 512, 256]
+    model_from_name = '10-17-23-00__512-512-256 paused_cuz_epsilon.keras'  # "01-25-22-05__256-256.keras"
+    memory_buffer = 'memory.pkl'  # None, 'memory.pkl'
+    log_rate = 0  # 25_000
     paths = get_paths(layer_sizes, model_from_name, memory_buffer, log_rate)
     print(paths)
 

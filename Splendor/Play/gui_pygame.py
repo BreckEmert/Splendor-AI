@@ -187,7 +187,6 @@ class SplendorGUI:
                 break
     
     def _handle_context_menu_click(self, payload: tuple[str, GUIMove]) -> None:
-        print("Handling context menu click.")
         button_choice, move = payload
 
         if button_choice == "clear":
@@ -359,11 +358,13 @@ class SplendorGUI:
 
         # Gems
         if self._take_picks:
-            gems_vec = np.zeros(6, dtype=int)
+            taken_gems = np.zeros(6, dtype=int)
             for c in self._take_picks:
-                gems_vec[c] += 1
-            n_discards = self.discards_required
-            lines.append(f"Take gems: {rewards.gems(gems_vec, n_discards):+.2f}")
+                taken_gems[c] += 1
+            tmp = player.clone()
+            _, discards = tmp.auto_take(taken_gems.copy())
+            rewards.gems.debug_gem_breakdown(taken_gems, discards)
+            lines.append(f"Take gems: {rewards.gems(taken_gems, discards):+.2f}")
 
         # Focused card (buy and reserve)
         if self._focus_target:
@@ -372,11 +373,18 @@ class SplendorGUI:
                 card = self.game.board.cards[ft.tier][ft.pos]
                 if card:
                     lines.append(f"Buy: {rewards.buy(card):+.2f}")
+                    rewards.buy.debug_buy_breakdown(card)  # OPTIONAL DEBUG
                     gold = np.zeros(6, dtype=int)
                     gold[5] = int(self.game.board.gems[5] > 0)
-                    lines.append(f"Reserve: {rewards.reserve(card, 0, gold):+.2f}")
+                    discards = np.zeros(6, dtype=int)
+                    if gold[5]:
+                        tmp = player.clone()
+                        _, discards = tmp.auto_take(gold.copy())
+                    rewards.reserve.debug_reserve_breakdown(card, gold, discards)  # OPTIONAL DEBUG
+                    lines.append(f"Reserve: {rewards.reserve(card, gold, discards):.2f}")
             elif ft.kind == "reserved":
                 card = player.reserved_cards[ft.reserve_idx]
+                rewards.buy.debug_buy_breakdown(card)  # OPTIONAL DEBUG
                 lines.append(f"Buy reserved: {rewards.buy(card):+.2f}")
 
         self._preview_lines = lines

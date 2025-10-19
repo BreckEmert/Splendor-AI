@@ -1,6 +1,5 @@
 # Splendor/Environment/Splendor_components/Board_components/splendor_cards_data.py
 
-# NOT CURRENTLY IMPLEMENTED
 # Making this because it's more accessible and faster compared to xlsx
 PRELOADED_CARD_DATA = {
     0: [
@@ -21,7 +20,7 @@ PRELOADED_CARD_DATA = {
         {'id': 15, 'gem': 3, 'points': 1, 'cost': [4, 0, 0, 0, 0]},
         {'id': 16, 'gem': 2, 'points': 0, 'cost': [0, 2, 0, 2, 0]},
         {'id': 17, 'gem': 4, 'points': 1, 'cost': [0, 4, 0, 0, 0]},
-        {'id': 18, 'gem': 3, 'points': 0, 'cost': [3, 0, 3, 0, 2]},
+        {'id': 18, 'gem': 3, 'points': 0, 'cost': [3, 0, 0, 0, 0]},
         {'id': 19, 'gem': 0, 'points': 0, 'cost': [0, 2, 2, 0, 1]},
         {'id': 20, 'gem': 2, 'points': 0, 'cost': [1, 3, 1, 0, 0]},
         {'id': 21, 'gem': 3, 'points': 0, 'cost': [1, 1, 1, 0, 1]},

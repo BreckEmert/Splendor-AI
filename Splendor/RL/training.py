@@ -13,7 +13,7 @@ def ddqn_loop(paths, log_rate=0):
     game_lengths = []
     step_counter = 0
 
-    replay_freq = 120
+    replay_freq = 256
     n = model.batch_size / replay_freq
     print(f"Replays are sampled {n} times on average.")
     """Need to consider whether because of the self-play correlation
@@ -22,7 +22,8 @@ def ddqn_loop(paths, log_rate=0):
     """
 
     # Loop through games - safe to stop at any time
-    for episode in range(60_001):
+    for episode in range(200_001):
+        # print(f"Starting a game, episode {episode}")
         game.reset()
       
         # Enable logging
@@ -35,7 +36,8 @@ def ddqn_loop(paths, log_rate=0):
             
             # Run replay (roughly 512 batch size / 4 samples = 120 rate)
             if step_counter%replay_freq == 0:
-                model.replay()
+                # model.replay()
+                model.replay_two_ply()
 
             # Draw the game state (very rare at my default of 25k)
             if logging:
@@ -43,13 +45,13 @@ def ddqn_loop(paths, log_rate=0):
         
         # End-of-game logging and saving
         game_lengths.append(game.half_turns)
-        if episode % 100 == 0:
+        if episode % 1_000 == 0:
             avg = sum(game_lengths)/len(game_lengths)/2
             model.log_game_lengths(avg)
             game_lengths = []
 
             # Save the model and memory
-            if episode % 20_000 == 0:
+            if episode % 10_000 == 0:
                 model.save_model()
                 model.write_memory()
     

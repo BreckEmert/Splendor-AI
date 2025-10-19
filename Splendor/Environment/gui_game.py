@@ -5,7 +5,7 @@ import numpy as np
 from typing import TYPE_CHECKING
 
 from Environment import Board, Player
-from RL import RewardEngine  # type: ignore
+from RL import RewardEngine, BasicRewardEngine, SparseRewardEngine
 if TYPE_CHECKING:
     from Play.common_types import GUIMove
 
@@ -15,7 +15,7 @@ class GUIGame:
         """Note: rest of init is performed by reset()"""
         self.players = [Player(name, agent, pos) for name, agent, pos in players]
         self.model = model
-        self.rewards = RewardEngine(self)
+        self.rewards = BasicRewardEngine(self)
         self.reset()
     
     def reset(self):

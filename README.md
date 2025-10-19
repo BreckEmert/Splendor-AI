@@ -2,24 +2,32 @@
 
 Welcome to the Splendor-AI repository! This project allows you to build and play versus a superhuman AI in the long-term planning board game Splendor, which won Board Game of the Year in 2014.  
 
-I'm quite proud of this project as there's a long list of repos and papers which have attempted to make this agent but almost all fail and none have surpassed human performance.  I was able to get there through Double-DQN with PER + dueling heads, and an extremely tuned state/action space.  Splendor has an unmanageable action space by default, so my key contribution is what I chose to keep in the action space and what to apply heuristics to (note that I kept this a pure RL approach: absolutely no intelligent logic or calculations are injected into the model[^1]).
+I'm quite proud of this project as there's a long list of repos and papers which have attempted to make this agent but almost all fail and none have surpassed human performance.  I was able to get there through Double-DQN with PER + dueling heads, and an extremely tuned state/action space.  Splendor has an unmanageable action space by default, so my key contribution is what I chose to keep in the action space and what to apply heuristics to (note that I kept this a pure RL approach: absolutely no intelligent logic or calculations are injected into the model[^1][^4]).
 
 ## Play now at https://breckemert.github.io/Splendor-Webapp/
 
 ## Overview
 
-- **Reinforcement Learning Approach**: Learns to play Splendor just above the upper level of skilled human performance.  While the average BoardGameArena game length is 28 moves, this agent currently plays games averaging 22 moves.[^2][^3]  The rendered games show the agent building up resources towards high point:gem ratio cards, blocking opponent goals, and thinking long-term.
-- **Brute Force Approach**: Searches thousands of games per second to help build an initial replay pool with some signal for how to take the right gems to buy cards.  Useful because this introduces much less bias than other methods that get the model started off with some signal.
-
-## Features
-
-- **Double DQN**: An expansion of Q-learning that helps with overestimation bias and stabilizes the q-values by having a lagged version of the policy model estimate the q-values.
+- **Performance**: Learns to play Splendor just above the upper level of skilled human performance.  While the average BoardGameArena game length is 28 moves, this agent currently plays games averaging 25 moves.[^2][^3]  The rendered games show the agent building up resources towards high point:gem ratio cards, blocking opponent goals, and thinking long-term.
 - **Visualization**: Generates frames of the games at each state along with card counts and move descriptions.
 - **Modular Design**: I built this in a fully object-oriented, clean and commented way.  Although the overall game is too complex to fully redo, you should have an easy time changing any specific set of features you want.
 
 <p align="center">
-  <img src="https://imgur.com/FZVbTyX.png" alt="Viz 1" width="45%">
-  <img src="https://imgur.com/lJ8jv10.png" alt="Viz 2" width="45%">
+  <img src="https://imgur.com/FZVbTyX.png" alt="Early game of the Splendor pygame app." width="45%">
+  <img src="https://imgur.com/lJ8jv10.png" alt="Late game of the Splendor pygame app." width="45%">
+</p>
+
+## Reinforcement Learning Overview
+
+This agent uses a Double Dueling Deep Q-Network (Dueling DDQN).  It's an expansion of Q-learning that helps with overestimation bias and stabilizes the q-values by having a lagged target network derived from the policy model to estimate the q-values.  This is a temporal-difference (TD) method, which means it relies on estimating the future reward, estimating again at the next step, and comparing its prediction with what it ended up seeing in order to "bootstrap" learn how to value actions.  And this makes it difficult to learn Splendor, because Splendor is a sticky game.  Once you commit to actions, there is no turning around.  The gem supply is extremely limited and the reserved cards stay in your inventory forever.  This makes the model correlate any positive reward it saw with any junk that was in its state, and unable to figure out how to avoid the junk in the first place.
+
+Here are some core lessons for anybody curious about how to do a similar project:
+- Correlate the sticky, dead-end states with negative rewards however you can.  If your model has some gems that no longer help it buy something on the board, then a negative reward in this scenario will make the model avoid actions that tend to lead into this state, regardless of being provided with an explicit path on how to get there.  It basically learns "If I take gems now, my state will start looking like one I received a lot of negative reward in, so I'll avoid it".
+- Take the time to plan out the perfect way to deal with things that are hard to model first.  A lot of my initial work in this project was dealing with how to take gems.  If you enumerate the possibilities there are an obscene amount, so something has to give.  The only question that matters is *which one sends a signal through*?  
+- Log everything in TensorBoard.  All of it.  It's extremely not hard to do compared to all the time it will save you in visualizing how and where to change every aspect of your RL.
+<p align="center">
+  <img src="reports/figures/tensorboard_qs.jpg" alt="Viz 1" width="30.6%">
+  <img src="reports/figures/tensorboard_weights.jpg" alt="Viz 2" width="45.3%">
 </p>
 
 ## Getting Started
@@ -32,8 +40,7 @@ I'm quite proud of this project as there's a long list of repos and papers which
 Next, open VSCode and open the project location (Splendor subfolder, **not** the parent git repository).  It should prompt you to reopen in a container, which launches the Docker accordingly.  Hit "Never" on VSCode asking you to open the parent git repository.
 
 #### Playing versus the AI
-
-
+Running the `play_vs_ai.py` while inside the container will host a local pygame instance.  The model it uses is the current "inference_model.keras" inside of the trained_agents folder.  The more complete version of the game is hosted [here](https://breckemert.github.io/Splendor-Webapp/) in my website, which uses a reasonably difficult model that is still possible to beat.
 
 #### Training
 
@@ -48,4 +55,6 @@ tensorboard --logdir=/workspace/RL/saved_files/tensorboard_logs
 
 [^2]: Statistics taken directly from BGA.  There is a screenshot of the statistics as I found them in 'reports/figures/avg_game_length.png' where the average game length can be calculated from.
 
-[^3]: Average game length during training self-play appears longer (~29 moves) because truly optimal play involves hoarding and blocking, artificially making the games slower compared to how most humans play.  The reported 22-move average is on a sample size of 50 games played on BoardGameArena (48 wins and 2 losses).
+[^3]: Average game length during training self-play appears longer (~29 moves) because truly optimal play involves hoarding and blocking, artificially making the games slower compared to how most humans play.  The reported 27-move average is on a sample size of 50 games played on BoardGameArena (48 wins and 2 losses).
+
+[^4]: There are extremely hard-coded rewards in the `RewardEngine`, but these end up in about the same game lengths - they just get there almost instantly during training.  Anything done there was just a fun extra step after building the webapp to get to code some math and actually see if I can model the game's underlying ground truth.

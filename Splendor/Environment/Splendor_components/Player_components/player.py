@@ -33,6 +33,10 @@ class Player:
     @property
     def effective_gems(self) -> ndarray:
         return self.gems + self.cards
+    
+    def cap(self, points: int | float) -> float:
+        """Limit a card's points to those that progress us to 15."""
+        return float(max(0, min(points, 15-self.points)))
 
     def _initialize_all_takes(self) -> None:
         """Preloads all possible take indices."""
@@ -108,7 +112,7 @@ class Player:
         self.gems -= spent_gems
         return spent_gems
 
-    def auto_take(self, gems_to_take: ndarray) -> tuple[ndarray, int]:
+    def auto_take(self, gems_to_take: ndarray) -> tuple[ndarray, ndarray]:
         """Add gems_to_take to self.gems, and if discards are
         needed try to discard gems that weren't taken (avoids 
         combinatorial discard space and does not significantly 
@@ -150,7 +154,7 @@ class Player:
         if gold_only:
             net_take[5] = 1
 
-        return net_take, n_discards
+        return net_take, discards
 
     def _get_legal_takes(self, board_gems: ndarray) -> ndarray:
         """For each possible take, there are ||take|| possible
