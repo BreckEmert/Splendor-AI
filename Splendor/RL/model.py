@@ -26,7 +26,7 @@ class RLAgent:
         self.huber = Huber()
 
         # Dimensions
-        self.state_dim = 251
+        self.state_dim = 326
         self.action_dim = 141
         self.batch_size = 512
 
@@ -135,7 +135,7 @@ class RLAgent:
             card_idx = buy_action // 2
             offset = 7 + card_idx*11 + 5
             action_offsets[a] = offset
-        # = 157    # start of active player block
+        # = 232    # start of active player block
         #  + 12    # skip gems (6), gem_sum(1), cards(5)
         #  + i*11  # skip i entire reserved-card blocks
         #  + 5     # offset to the 'points' element within the card
@@ -143,9 +143,9 @@ class RLAgent:
         for buy_reserved_action in range(6):
             a = 119 + buy_reserved_action
             i = buy_reserved_action // 2
-            offset = 157 + 12 + i*11 + 5
+            offset = 232 + 12 + i*11 + 5
             action_offsets[a] = offset
-        #  157 = start of active player block
+        #  232 = start of active player block
 
         self.buyIdx_to_pointIdx = tf.constant(action_offsets, dtype=tf.int32)
 

@@ -63,11 +63,11 @@ class Board:
 
         return card, gold
         
-    def to_state(self, effective_gems):
+    def to_state(self, effective_gems, enemy_effective_gems):
         """Some overwriting occurs because of the 6-dim
         vector standardization, so not all [5] have meaning.
         """
-        state_vector = np.zeros(157, dtype=np.float32)
+        state_vector = np.zeros(232, dtype=np.float32)
 
         # Gems (6+1 = 7)
         state_vector[:6] = self.gems / 4.0
@@ -91,4 +91,21 @@ class Board:
                 state_vector[start:start+6] = card_vector
             start += 6
 
-        return state_vector  # 157
+        # Opponent affordability: shop cards (12*5 = 60)
+        start = 157
+        for tier in self.cards:
+            for card in tier:
+                if card:
+                    enemy_cost = np.maximum(card.cost - enemy_effective_gems, 0)[:5] / 4
+                    state_vector[start:start+5] = enemy_cost
+                start += 5
+
+        # Opponent affordability: nobles (3*5 = 15)
+        start = 217
+        for card in self.nobles:
+            if card:
+                enemy_cost = np.maximum(card.cost - enemy_effective_gems, 0)[:5] / 4
+                state_vector[start:start+5] = enemy_cost
+            start += 5
+
+        return state_vector  # 232
