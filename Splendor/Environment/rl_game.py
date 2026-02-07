@@ -3,7 +3,7 @@
 import numpy as np
 
 from Environment import Board, Player
-from RL import RewardEngine, BasicRewardEngine, SparseRewardEngine
+from RL import BasicRewardEngine, SparseRewardEngine  # type: ignore
 
 
 class RLGame:
@@ -11,7 +11,7 @@ class RLGame:
         """Note: rest of init is performed by reset()"""
         self.players = [Player(name, agent, pos) for name, agent, pos in players]
         self.model = model
-        self.rewards = SparseRewardEngine(self)
+        self.rewards = BasicRewardEngine(self)
         self.reset()
     
     def reset(self):
@@ -149,9 +149,10 @@ class RLGame:
         cur_player = self.active_player
         enemy_player = self.players[(self.half_turns+1) % 2]
 
-        board_vector = self.board.to_state(cur_player.effective_gems)       # 157
+        board_vector = self.board.to_state(cur_player.effective_gems,       # 232
+                                           enemy_player.effective_gems)
         hero_vector = self.active_player.to_state()                         # 47
         enemy_vector = enemy_player.to_state()                              # 47
 
-        vector = np.concatenate((board_vector, hero_vector, enemy_vector))  # 251
+        vector = np.concatenate((board_vector, hero_vector, enemy_vector))  # 326
         return vector.astype(np.float32)

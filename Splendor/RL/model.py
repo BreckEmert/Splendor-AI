@@ -26,19 +26,18 @@ class RLAgent:
         self.huber = Huber()
 
         # Dimensions
-        self.state_dim = 251
+        self.state_dim = 326
         self.action_dim = 141
         self.batch_size = 512
 
         # DQN
-        # self.gamma = 0.98
-        # # self.gamma = 0.999
-        # self.gamma_max = 0.999
-        # self.gamma_accum = 1.5e-4
+        self.gamma = 0.98
+        self.gamma_max = 0.999
+        self.gamma_accum = 1.5e-4
         # Overnight:
-        self.gamma = 1.0
-        self.gamma_max = 1.0
-        self.gamma_accum = 2e-5
+        # self.gamma = 1.0
+        # self.gamma_max = 1.0
+        # self.gamma_accum = 2e-5
 
         self.epsilon = 0.002
         self.epsilon_min = 0.001
@@ -56,22 +55,22 @@ class RLAgent:
 
         # Learning rate
         # Regular:
-        # lr_schedule = ScheduleWithWarmup(
-        #     warmup_init_lr = 1e-5, 
-        #     decay_init_lr = 8e-4,
-        #     warmup_steps = 500, 
-        #     decay_steps = 20_000, 
-        #     decay_rate = 0.1
-        # )
-        # Finetuning:
-        override_schedule = True
         lr_schedule = ScheduleWithWarmup(
-            warmup_init_lr = 1e-7, 
-            decay_init_lr = 8e-5, 
-            warmup_steps = 4_000, 
-            decay_steps = 30_000, 
+            warmup_init_lr = 1e-5, 
+            decay_init_lr = 8e-4,
+            warmup_steps = 500, 
+            decay_steps = 20_000, 
             decay_rate = 0.1
         )
+        # Finetuning:
+        # override_schedule = True
+        # lr_schedule = ScheduleWithWarmup(
+        #     warmup_init_lr = 1e-7, 
+        #     decay_init_lr = 8e-5, 
+        #     warmup_steps = 4_000, 
+        #     decay_steps = 30_000, 
+        #     decay_rate = 0.1
+        # )
         # Overnight:
         # lr_schedule = ScheduleWithWarmup(
         #     warmup_init_lr = 5e-7,
@@ -135,7 +134,7 @@ class RLAgent:
             card_idx = buy_action // 2
             offset = 7 + card_idx*11 + 5
             action_offsets[a] = offset
-        # = 157    # start of active player block
+        # = 232    # start of active player block
         #  + 12    # skip gems (6), gem_sum(1), cards(5)
         #  + i*11  # skip i entire reserved-card blocks
         #  + 5     # offset to the 'points' element within the card
@@ -143,9 +142,9 @@ class RLAgent:
         for buy_reserved_action in range(6):
             a = 119 + buy_reserved_action
             i = buy_reserved_action // 2
-            offset = 157 + 12 + i*11 + 5
+            offset = 232 + 12 + i*11 + 5
             action_offsets[a] = offset
-        #  157 = start of active player block
+        #  232 = start of active player block
 
         self.buyIdx_to_pointIdx = tf.constant(action_offsets, dtype=tf.int32)
 

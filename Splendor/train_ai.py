@@ -53,7 +53,7 @@ def get_paths(layer_sizes, model_from_name, memory_buffer_name, log_rate):
 
 def main():
     layer_sizes = [512, 512, 256]
-    model_from_name = '10-17-23-00__512-512-256 paused_cuz_epsilon.keras'  # "01-25-22-05__256-256.keras"
+    model_from_name = None  # "01-25-22-05__256-256.keras"
     memory_buffer = 'memory.pkl'  # None, 'memory.pkl'
     log_rate = 0  # 25_000
     paths = get_paths(layer_sizes, model_from_name, memory_buffer, log_rate)

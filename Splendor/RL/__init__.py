@@ -3,5 +3,5 @@
 from .model import RLAgent
 from .inference_model import InferenceAgent
 from .random_model import RandomAgent
-from .rewards import RewardEngine, BasicRewardEngine, SparseRewardEngine
+from .rewards import BasicRewardEngine, SparseRewardEngine
 from .training import ddqn_loop

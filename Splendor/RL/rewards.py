@@ -449,6 +449,7 @@ class SparseRewardEngine:
         def __call__(self, winner: bool) -> float:
             return 10.0 if winner else -10.0
 
+
 class SparseReserveRewardEngine:
     """Sparse plus trying to fix rewards.  I realize the problem now
     which is that the model can't explore reserving, because at all

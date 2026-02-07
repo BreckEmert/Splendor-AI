@@ -10,7 +10,7 @@ class InferenceAgent:
         # enable_unsafe_deserialization()
 
         # Dimensions
-        self.state_dim = 251
+        self.state_dim = 326
         self.action_dim = 141
         self.batch_size = 512
 
