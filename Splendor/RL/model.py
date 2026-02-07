@@ -26,7 +26,7 @@ class RLAgent:
         self.huber = Huber()
 
         # Dimensions
-        self.state_dim = 326
+        self.state_dim = 386
         self.action_dim = 141
         self.batch_size = 512
 

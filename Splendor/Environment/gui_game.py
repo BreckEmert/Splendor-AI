@@ -186,10 +186,16 @@ class GUIGame:
         cur_player = self.active_player
         enemy_player = self.players[(self.half_turns+1) % 2]
 
-        board_vector = self.board.to_state(cur_player.effective_gems,         # 232
-                                          enemy_player.effective_gems)
-        hero_vector = self.active_player.to_state()                          # 47
-        enemy_vector = enemy_player.to_state()                               # 47
+        board_vector = self.board.to_state(cur_player.effective_gems,          # 232
+                                           enemy_player.effective_gems)
+        cur_vector = cur_player.to_state()                                    # 47
+        enemy_vector = enemy_player.to_state()                                # 47
 
-        vector = np.concatenate((board_vector, hero_vector, enemy_vector))   # 326
+        # Tempo (can-buy-now) and points-if-bought, both perspectives (60)
+        shop_cards = [c for tier in self.board.cards for c in tier]
+        pad = [None] * 3
+        cur_cards = shop_cards + (cur_player.reserved_cards + pad)[:3]
+        enemy_cards = shop_cards + (enemy_player.reserved_cards + pad)[:3]
+
+        vector = np.concatenate((board_vector, cur_vector, enemy_vector, cur_player.tempo_and_winrate(cur_cards), enemy_player.tempo_and_winrate(enemy_cards)))  # 386
         return vector.astype(np.float32)
