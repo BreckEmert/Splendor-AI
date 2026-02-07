@@ -308,6 +308,17 @@ class Player:
 
         return state_vector  # length 47
 
+    def tempo_and_winrate(self, cards) -> ndarray:
+        """Can-buy-now bool and points-if-bought for a fixed-size card list."""
+        n = len(cards)
+        features = np.zeros(n * 2, dtype=np.float32)
+        for i, card in enumerate(cards):
+            if card:
+                _, afford = self.can_afford_card(card)
+                features[i] = float(afford)
+                features[n + i] = (self.points + card.points) / 15
+        return features
+
     def clone(self):
         clone = Player.__new__(Player)
         clone.__dict__ = self.__dict__.copy()
