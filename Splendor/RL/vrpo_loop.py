@@ -10,7 +10,7 @@ import numpy as np
 
 from .vrpo_trainer import VRPOAgent
 from .vrpo_game import VRPOGame, collect_vectorized
-from .vrpo_eval import evaluate, KerasGreedyOpponent
+from .vrpo_eval import evaluate_vectorized, KerasGreedyOpponent
 
 
 def _load_opponents(paths):
@@ -79,11 +79,11 @@ def vrpo_loop(paths, iterations=5000, save_every=50, log_every=1,
         if agent.eval_every and it % agent.eval_every == 0:
             wr_dqn = dr_dqn = float('nan')
             if dqn_opp is not None:
-                wr_dqn, _, draws = evaluate(agent, dqn_opp, agent.eval_games,
-                                            agent.max_half_turns)
+                wr_dqn, _, draws = evaluate_vectorized(
+                    agent, dqn_opp, agent.eval_games, agent.max_half_turns)
                 dr_dqn = draws
-            wr_rnd, _, draws_r = evaluate(agent, random_opp, agent.eval_games,
-                                          agent.max_half_turns)
+            wr_rnd, _, draws_r = evaluate_vectorized(
+                agent, random_opp, agent.eval_games, agent.max_half_turns)
             agent.log_eval(wr_dqn, dr_dqn, wr_rnd, draws_r)
             print(f"[iter {it}] EVAL vs_dqn={wr_dqn:.3f} vs_random={wr_rnd:.3f}")
 

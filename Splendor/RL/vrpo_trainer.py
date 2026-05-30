@@ -218,6 +218,20 @@ class VRPOAgent:
         logits = self.actor(s, training=False)[0]
         return tf.where(m, logits, tf.fill(tf.shape(logits), NEG_INF))
 
+    @tf.function(reduce_retracing=True)
+    def _greedy_batch_tf(self, S, M):
+        logits = self.actor(S, training=False)
+        masked = tf.where(M, logits, tf.fill(tf.shape(logits), NEG_INF))
+        return tf.argmax(masked, axis=1, output_type=tf.int32)
+
+    def predict_batch(self, states, masks):
+        """Batched GREEDY argmax actions (for the vectorized evaluator). Same
+        rule as get_predictions+argmax, one forward pass for many states.
+        """
+        S = tf.convert_to_tensor(states, dtype=tf.float32)
+        M = tf.convert_to_tensor(masks, dtype=tf.bool)
+        return self._greedy_batch_tf(S, M).numpy()
+
     # ------------------------------------------------------------------ #
     # Q-boosting: turn one seat's trajectory into advantages + Q targets
     # ------------------------------------------------------------------ #
