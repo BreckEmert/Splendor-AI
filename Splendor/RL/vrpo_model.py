@@ -19,9 +19,45 @@ os.environ.setdefault('TF_CPP_MIN_LOG_LEVEL', '3')  # Stop NUMA/info spam
 import tensorflow as tf
 from keras.layers import Input, Dense, LeakyReLU
 from keras.initializers import HeNormal
+from keras.saving import register_keras_serializable
 
 
 NEG_INF = -1e9  # masking sentinel; exp(NEG_INF) underflows cleanly to 0.0
+
+
+@register_keras_serializable(package="vrpo")
+class WarmupDecaySchedule(tf.keras.optimizers.schedules.LearningRateSchedule):
+    """Linear warmup to peak_lr over warmup_steps, then exponential decay
+    (peak_lr * decay_rate ** ((step - warmup) / decay_steps)) floored at
+    min_lr. Steps are OPTIMIZER steps (per minibatch), not training iterations.
+
+    Registered serializable so saved models reload cleanly; in practice VRPO
+    also resumes via weights-only + compile=False, so the optimizer is rebuilt
+    fresh rather than deserialized (avoids the custom-object load failures the
+    DQN hit). NOTE: on resume the step counter restarts, so warmup re-runs once
+    - kept short on purpose.
+    """
+    def __init__(self, peak_lr, warmup_steps, decay_steps, decay_rate, min_lr):
+        super().__init__()
+        self.peak_lr = float(peak_lr)
+        self.warmup_steps = float(warmup_steps)
+        self.decay_steps = float(decay_steps)
+        self.decay_rate = float(decay_rate)
+        self.min_lr = float(min_lr)
+
+    def __call__(self, step):
+        step = tf.cast(step, tf.float32)
+        warm = self.peak_lr * (step / tf.maximum(self.warmup_steps, 1.0))
+        decayed = self.peak_lr * tf.pow(
+            self.decay_rate,
+            tf.maximum(step - self.warmup_steps, 0.0) / self.decay_steps)
+        decayed = tf.maximum(decayed, self.min_lr)
+        return tf.where(step < self.warmup_steps, warm, decayed)
+
+    def get_config(self):
+        return {"peak_lr": self.peak_lr, "warmup_steps": self.warmup_steps,
+                "decay_steps": self.decay_steps, "decay_rate": self.decay_rate,
+                "min_lr": self.min_lr}
 
 
 def _trunk(state_input, layer_sizes, prefix):

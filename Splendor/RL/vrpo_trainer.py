@@ -34,8 +34,10 @@ import numpy as np
 import tensorflow as tf
 from keras.optimizers import Adam
 
+from keras.models import load_model
+
 from .vrpo_model import (
-    build_actor, build_critic, NEG_INF,
+    build_actor, build_critic, NEG_INF, WarmupDecaySchedule,
     masked_log_softmax, masked_softmax,
 )
 
@@ -76,6 +78,15 @@ class VRPOAgent:
         self.actor_lr = _envf('VRPO_ACTOR_LR', 3e-4)
         self.critic_lr = _envf('VRPO_CRITIC_LR', 3e-4)
 
+        # LR schedule (warmup + gentle exponential decay), on by default - the
+        # DQN uses an analogous warmup/decay schedule; VRPO previously ran flat
+        # Adam. Steps are optimizer steps (~minibatches*epochs per iteration).
+        self.lr_schedule_on = _envi('VRPO_LR_SCHEDULE', 1)
+        self.lr_warmup_steps = _envi('VRPO_LR_WARMUP_STEPS', 200)
+        self.lr_decay_steps = _envi('VRPO_LR_DECAY_STEPS', 4000)
+        self.lr_decay_rate = _envf('VRPO_LR_DECAY_RATE', 0.5)
+        self.lr_min_frac = _envf('VRPO_LR_MIN_FRAC', 0.1)
+
         # Cyclic critic replay buffer (the paper's design; previously a TODO).
         # Retains (state, action, q_target) from the last N rollouts so the
         # critic trains on more, decorrelated data instead of a single rollout
@@ -112,8 +123,18 @@ class VRPOAgent:
         print("VRPO config:", self.config)
         self.actor = build_actor(self.state_dim, self.action_dim, layer_sizes)
         self.critic = build_critic(self.state_dim, self.action_dim, layer_sizes)
-        self.actor_opt = Adam(learning_rate=self.actor_lr, clipnorm=1.0)
-        self.critic_opt = Adam(learning_rate=self.critic_lr, clipnorm=1.0)
+
+        # Optionally resume weights from a prior run (weights-only, compile=False
+        # so we never deserialize a saved optimizer/schedule). VRPO_RESUME points
+        # at the actor .keras; the critic path is derived by name.
+        resume = os.getenv('VRPO_RESUME')
+        if resume:
+            self._resume_weights(resume)
+
+        actor_lr = self._make_lr(self.actor_lr)
+        critic_lr = self._make_lr(self.critic_lr)
+        self.actor_opt = Adam(learning_rate=actor_lr, clipnorm=1.0)
+        self.critic_opt = Adam(learning_rate=critic_lr, clipnorm=1.0)
 
         # Collection interface used by VRPOGame + reused apply_move.
         self.memory: list = []
@@ -122,6 +143,27 @@ class VRPOAgent:
         self._log_config_text()
         self.iteration = 0
         self._truncated_games = 0
+
+    def _make_lr(self, peak):
+        if not self.lr_schedule_on:
+            return peak
+        return WarmupDecaySchedule(
+            peak_lr=peak, warmup_steps=self.lr_warmup_steps,
+            decay_steps=self.lr_decay_steps, decay_rate=self.lr_decay_rate,
+            min_lr=peak * self.lr_min_frac)
+
+    def _resume_weights(self, actor_path):
+        critic_path = actor_path.replace('_actor.keras', '_critic.keras')
+        a = load_model(actor_path, compile=False)
+        self.actor.set_weights(a.get_weights())
+        print(f"Resumed actor weights <- {actor_path}")
+        if os.path.exists(critic_path):
+            c = load_model(critic_path, compile=False)
+            self.critic.set_weights(c.get_weights())
+            print(f"Resumed critic weights <- {critic_path}")
+        else:
+            print(f"WARNING: critic checkpoint not found at {critic_path}; "
+                  f"critic starts fresh.")
 
     def _log_config_text(self):
         text = "\n".join(f"{k}: {v}" for k, v in self.config.items())
@@ -347,6 +389,11 @@ class VRPOAgent:
                                   float(np.mean(game_lengths)) / 2.0, step=step)
             tf.summary.scalar('VRPO/truncated_games_total',
                               self._truncated_games, step=step)
+            # Current LR (resolve schedule at the optimizer's step count).
+            lr = self.actor_opt.learning_rate
+            if callable(lr):
+                lr = lr(self.actor_opt.iterations)
+            tf.summary.scalar('VRPO/actor_lr', float(lr), step=step)
         self.tensorboard.flush()
 
     def log_eval(self, wr_dqn, draws_dqn, wr_random, draws_random):
