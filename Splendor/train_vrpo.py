@@ -21,6 +21,7 @@ from RL.vrpo_loop import vrpo_loop
 _NAME_KNOBS = [
     ('VRPO_KL_COEF', 'kl'), ('VRPO_ACTOR_LR', 'alr'), ('VRPO_CRITIC_LR', 'clr'),
     ('VRPO_LAMBDA', 'lam'), ('VRPO_CLIP', 'clip'), ('VRPO_ROLLOUT', 'roll'),
+    ('VRPO_CRITIC_BUFFER', 'cbuf'),
 ]
 
 

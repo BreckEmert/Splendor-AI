@@ -28,6 +28,8 @@ search without editing code), e.g.:  VRPO_KL_COEF=0.05 python train_vrpo.py
 import os
 os.environ.setdefault('TF_CPP_MIN_LOG_LEVEL', '3')
 
+from collections import deque
+
 import numpy as np
 import tensorflow as tf
 from keras.optimizers import Adam
@@ -73,6 +75,16 @@ class VRPOAgent:
         self.actor_lr = _envf('VRPO_ACTOR_LR', 3e-4)
         self.critic_lr = _envf('VRPO_CRITIC_LR', 3e-4)
 
+        # Cyclic critic replay buffer (the paper's design; previously a TODO).
+        # Retains (state, action, q_target) from the last N rollouts so the
+        # critic trains on more, decorrelated data instead of a single rollout
+        # it immediately discards. 1 == old behaviour (current rollout only).
+        # Targets from older rollouts are mildly stale (computed by a recent
+        # critic), which is the standard accuracy/variance trade-off; keeping N
+        # small (~4) bounds that staleness.
+        self.critic_buffer_rollouts = _envi('VRPO_CRITIC_BUFFER', 4)
+        self._critic_buf = deque(maxlen=self.critic_buffer_rollouts)
+
         # Evaluation cadence (0 disables in-loop eval). eval_games is a binomial
         # sample over RANDOM BOARDS (decks reshuffle each game), so more games
         # reduces metric noise even though both policies are deterministic.
@@ -91,6 +103,7 @@ class VRPOAgent:
             'critic_epochs': self.critic_epochs, 'minibatches': self.minibatches,
             'rollout_size': self.rollout_size, 'actor_lr': self.actor_lr,
             'critic_lr': self.critic_lr,
+            'critic_buffer_rollouts': self.critic_buffer_rollouts,
         }
 
         layer_sizes = paths['layer_sizes']
@@ -218,16 +231,28 @@ class VRPOAgent:
                 acc['approx_kl'] += float(approx_kl)
                 a_steps += 1
 
-        # TODO(faithful): mix in a cyclic replay buffer of recent rollouts here,
-        # re-deriving q_targets with the current critic each epoch.
+        # --- Critic phase: train over the cyclic replay buffer ---
+        # Add this rollout's (state, action, q_target) to the buffer, then
+        # regress the critic across ALL retained rollouts. This gives the critic
+        # several rollouts' worth of data per iteration instead of one.
+        self._critic_buf.append((states, actions, q_target))
+        cb_S = tf.convert_to_tensor(
+            np.concatenate([r[0] for r in self._critic_buf]), tf.float32)
+        cb_A = tf.convert_to_tensor(
+            np.concatenate([r[1] for r in self._critic_buf]), tf.int32)
+        cb_QT = tf.convert_to_tensor(
+            np.concatenate([r[2] for r in self._critic_buf]), tf.float32)
+        cb_N = int(cb_S.shape[0])
+        cb_mb = max(1, cb_N // self.minibatches)
+
         critic_sum = 0.0
         c_steps = 0
         for _ in range(self.critic_epochs):
-            order = tf.random.shuffle(tf.range(N))
-            for start in range(0, N, mb):
-                b = order[start:start + mb]
-                c = self._critic_step(tf.gather(S, b), tf.gather(A, b),
-                                      tf.gather(QT, b))
+            order = tf.random.shuffle(tf.range(cb_N))
+            for start in range(0, cb_N, cb_mb):
+                b = order[start:start + cb_mb]
+                c = self._critic_step(tf.gather(cb_S, b), tf.gather(cb_A, b),
+                                      tf.gather(cb_QT, b))
                 critic_sum += float(c); c_steps += 1
 
         return {
