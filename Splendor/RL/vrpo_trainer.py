@@ -71,6 +71,7 @@ class VRPOAgent:
         self.critic_epochs = _envi('VRPO_CRITIC_EPOCHS', 4)  # K_critic
         self.minibatches = _envi('VRPO_MINIBATCHES', 4)      # M
         self.rollout_size = _envi('VRPO_ROLLOUT', 2048)      # transitions/iter
+        self.parallel_games = _envi('VRPO_PARALLEL_GAMES', 32)  # vectorized rollout width
         self.max_half_turns = _envi('VRPO_MAX_HALF_TURNS', 200)
         self.actor_lr = _envf('VRPO_ACTOR_LR', 3e-4)
         self.critic_lr = _envf('VRPO_CRITIC_LR', 3e-4)
@@ -138,7 +139,7 @@ class VRPOAgent:
     # ------------------------------------------------------------------ #
     def act(self, state, mask):
         """SAMPLE a legal move from the current policy; return (action, logp).
-        Used during self-play rollout collection.
+        Single-row path (kept for the non-vectorized game loop / tests).
         """
         s = tf.convert_to_tensor(state[None, :], dtype=tf.float32)
         m = tf.convert_to_tensor(mask[None, :], dtype=tf.bool)
@@ -146,6 +147,24 @@ class VRPOAgent:
         logp = masked_log_softmax(logits, m)[0]
         action = int(tf.random.categorical(logp[None, :], 1)[0, 0].numpy())
         return action, float(logp[action].numpy())
+
+    @tf.function(reduce_retracing=True)
+    def _act_batch_tf(self, S, M):
+        logits = self.actor(S, training=False)
+        logp_all = masked_log_softmax(logits, M)             # (G, A)
+        actions = tf.random.categorical(logp_all, 1)[:, 0]   # (G,)
+        logps = tf.gather(logp_all, actions, batch_dims=1)   # (G,)
+        return actions, logps
+
+    def act_batch(self, states, masks):
+        """SAMPLE one legal move per game for a BATCH of states/masks.
+        Returns (actions[int32], logps[float32]) as numpy. This is the call
+        that makes the vectorized rollout fast: one forward pass for G games.
+        """
+        S = tf.convert_to_tensor(states, dtype=tf.float32)
+        M = tf.convert_to_tensor(masks, dtype=tf.bool)
+        actions, logps = self._act_batch_tf(S, M)
+        return actions.numpy().astype(np.int32), logps.numpy().astype(np.float32)
 
     def get_predictions(self, state, mask):
         """GREEDY interface compatible with Player.choose_move (which argmaxes).

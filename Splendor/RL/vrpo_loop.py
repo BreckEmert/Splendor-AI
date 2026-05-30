@@ -9,7 +9,7 @@ policy head-to-head vs the DQN and vs random (the real strength signal).
 import numpy as np
 
 from .vrpo_trainer import VRPOAgent
-from .vrpo_game import VRPOGame
+from .vrpo_game import VRPOGame, collect_vectorized
 from .vrpo_eval import evaluate, KerasGreedyOpponent
 
 
@@ -37,7 +37,6 @@ def vrpo_loop(paths, iterations=5000, save_every=50, log_every=1,
         agent.rollout_size = rollout_size
 
     players = [('Player1', agent, 0), ('Player2', agent, 1)]
-    game = VRPOGame(players, agent, max_half_turns=agent.max_half_turns)
 
     dqn_opp, random_opp = (None, None)
     if agent.eval_every:
@@ -49,21 +48,19 @@ def vrpo_loop(paths, iterations=5000, save_every=50, log_every=1,
     for it in range(iterations):
         agent.iteration = it
 
-        # --- Collect an on-policy rollout ---
+        # --- Collect an on-policy rollout (vectorized: G games in lockstep) ---
         batch_S, batch_A, batch_LP, batch_MK, batch_ADV, batch_QT = \
             [], [], [], [], [], []
-        game_lengths = []
-        collected = 0
-        while collected < agent.rollout_size:
-            seat0, seat1 = game.play_game()
-            game_lengths.append(game.half_turns)
+        trajectories, game_lengths = collect_vectorized(
+            agent, players, agent.parallel_games,
+            agent.rollout_size, agent.max_half_turns)
+        for seat0, seat1 in trajectories:
             for traj in (seat0, seat1):
                 if not traj:
                     continue
                 st, ac, lp, mk, adv, qt = agent.process_trajectory(traj)
                 batch_S.append(st); batch_A.append(ac); batch_LP.append(lp)
                 batch_MK.append(mk); batch_ADV.append(adv); batch_QT.append(qt)
-                collected += len(st)
 
         S = np.concatenate(batch_S)
         A = np.concatenate(batch_A)
