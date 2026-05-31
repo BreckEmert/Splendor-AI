@@ -87,6 +87,10 @@ class VRPOAgent:
         # matches train_vrpo's VRPO_ITERS; loop may pass fewer (tests) - then
         # the schedules just stay near their start, which is harmless.
         self.total_iters = _envi('VRPO_ITERS', 5000)
+        # Schedule horizon (for LR + KL anneal), DECOUPLED from run length so a
+        # long overnight run can reach its LR/KL floors by VRPO_SCHED_ITERS and
+        # then HOLD there for the remaining iters. Defaults to the run length.
+        self.sched_iters = _envi('VRPO_SCHED_ITERS', self.total_iters)
         self.steps_per_iter = self.minibatches * self.actor_epochs
 
         # LR schedule (warmup + horizon-matched cosine decay), on by default.
@@ -128,7 +132,7 @@ class VRPOAgent:
             'minibatches': self.minibatches, 'rollout_size': self.rollout_size,
             'actor_lr': self.actor_lr, 'critic_lr': self.critic_lr,
             'critic_buffer_rollouts': self.critic_buffer_rollouts,
-            'total_iters': self.total_iters,
+            'total_iters': self.total_iters, 'sched_iters': self.sched_iters,
             'league_on': self.league_on, 'league_prob': self.league_prob,
             'league_pool': self.league_pool, 'snapshot_every': self.snapshot_every,
         }
@@ -167,7 +171,7 @@ class VRPOAgent:
     def _make_lr(self, peak):
         if not self.lr_schedule_on:
             return peak
-        total_steps = max(self.total_iters * self.steps_per_iter,
+        total_steps = max(self.sched_iters * self.steps_per_iter,
                           self.lr_warmup_steps + 1)
         return WarmupCosineSchedule(
             peak_lr=peak, warmup_steps=self.lr_warmup_steps,
@@ -192,10 +196,11 @@ class VRPOAgent:
             tf.summary.text('VRPO/config', text, step=0)
 
     def _current_kl_coef(self):
-        """Linearly anneal kl_coef start->end across the planned run."""
-        if self.kl_coef_end == self.kl_coef_start or self.total_iters <= 1:
+        """Linearly anneal kl_coef start->end across the schedule horizon, then
+        HOLD at the end value for the remaining iters (frac clamps to 1.0)."""
+        if self.kl_coef_end == self.kl_coef_start or self.sched_iters <= 1:
             return self.kl_coef_start
-        frac = min(1.0, self.iteration / float(self.total_iters))
+        frac = min(1.0, self.iteration / float(self.sched_iters))
         return self.kl_coef_start + (self.kl_coef_end - self.kl_coef_start) * frac
 
     def remember(self, entry) -> None:
