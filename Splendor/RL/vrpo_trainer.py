@@ -123,11 +123,12 @@ class VRPOAgent:
 
         # Evaluation cadence (0 disables). Strength = greedy win-rate vs the
         # fixed DQN inference model. The eval is the expensive periodic step
-        # (eval_games self-play games each), so 100 keeps overhead low while
-        # still giving ~30 points over a 3000-iter run. eval_games is a binomial
-        # sample over random boards, so more games => less metric noise.
-        self.eval_every = _envi('VRPO_EVAL_EVERY', 100)
+        # (eval_games self-play games each), so it runs sparsely. eval_games is
+        # a binomial sample over random boards, so more games => less noise.
+        self.eval_every = _envi('VRPO_EVAL_EVERY', 350)
         self.eval_games = _envi('VRPO_EVAL_GAMES', 80)
+        # Cheap scalar metrics (critic_loss, entropy, lr, ...) logging cadence.
+        self.log_every = _envi('VRPO_LOG_EVERY', 100)
 
         # Best-checkpoint tracking (periodic saves capture the last iter, which
         # may be past a peak; keep the best-by-vs_dqn model separately).
@@ -143,6 +144,7 @@ class VRPOAgent:
             'actor_lr': self.actor_lr, 'critic_lr': self.critic_lr,
             'critic_buffer_rollouts': self.critic_buffer_rollouts,
             'total_iters': self.total_iters, 'sched_iters': self.sched_iters,
+            'eval_every': self.eval_every, 'log_every': self.log_every,
             'league_on': self.league_on, 'league_prob': self.league_prob,
             'league_pool': self.league_pool, 'snapshot_every': self.snapshot_every,
         }

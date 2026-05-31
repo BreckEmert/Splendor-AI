@@ -31,11 +31,14 @@ def _load_dqn_opponent(paths):
         return None
 
 
-def vrpo_loop(paths, iterations=5000, save_every=50, log_every=1,
+def vrpo_loop(paths, iterations=5000, save_every=50, log_every=None,
               rollout_size=None):
     agent = VRPOAgent(paths)
     if rollout_size:
         agent.rollout_size = rollout_size
+    # Metrics logging cadence: explicit arg wins, else the agent's (env) value.
+    if log_every is None:
+        log_every = agent.log_every
 
     players = [('Player1', agent, 0), ('Player2', agent, 1)]
 
