@@ -68,13 +68,12 @@ def vrpo_loop(paths, iterations=5000, save_every=50, log_every=1,
             agent, players, agent.parallel_games,
             agent.rollout_size, agent.max_half_turns,
             league=league, league_prob=(agent.league_prob if league else 0.0))
-        for seat0, seat1 in trajectories:
-            for traj in (seat0, seat1):
-                if not traj:
-                    continue
-                st, ac, lp, mk, adv, qt = agent.process_trajectory(traj)
-                batch_S.append(st); batch_A.append(ac); batch_LP.append(lp)
-                batch_MK.append(mk); batch_ADV.append(adv); batch_QT.append(qt)
+        # Batch all trajectories' forward passes into 2 GPU calls (vs 2 per
+        # trajectory) - see VRPOAgent.process_trajectories.
+        flat = [t for seat0, seat1 in trajectories for t in (seat0, seat1) if t]
+        for st, ac, lp, mk, adv, qt in agent.process_trajectories(flat):
+            batch_S.append(st); batch_A.append(ac); batch_LP.append(lp)
+            batch_MK.append(mk); batch_ADV.append(adv); batch_QT.append(qt)
 
         S = np.concatenate(batch_S)
         A = np.concatenate(batch_A)

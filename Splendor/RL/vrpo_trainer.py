@@ -312,6 +312,63 @@ class VRPOAgent:
         return states, actions, logps, masks, advantages.astype(np.float32), \
             q_targets.astype(np.float32)
 
+    def _trace(self, rewards, dones, V, Qsa):
+        """Backward Expected SARSA(lambda) trace for one trajectory (numpy).
+        Returns (advantages, q_targets). Pure CPU; no GPU calls."""
+        L = len(rewards)
+        G = np.zeros(L, dtype=np.float32)
+        gl = self.gamma * self.lam
+        next_G = 0.0
+        for i in range(L - 1, -1, -1):
+            nonterminal = 1.0 - dones[i]
+            v_next = V[i + 1] if (i + 1 < L) else 0.0
+            delta = rewards[i] + self.gamma * nonterminal * v_next - Qsa[i]
+            G[i] = delta + gl * nonterminal * next_G
+            next_G = G[i]
+        return (Qsa - V) + G, Qsa + G
+
+    def process_trajectories(self, trajs):
+        """Batched equivalent of process_trajectory over MANY trajectories.
+
+        Runs ONE critic forward + ONE actor forward over every state across all
+        trajectories (instead of a pair per trajectory), then the cheap
+        per-trajectory Expected SARSA(lambda) trace in numpy. Mathematically
+        identical to calling process_trajectory on each trajectory - the trace
+        respects per-trajectory boundaries (v_next=0 at each trajectory's end) -
+        but collapses ~2*N_traj tiny GPU round-trips into 2. `trajs` must be
+        non-empty trajectories. Returns a list of per-traj tuples
+        (states, actions, logps, masks, advantages, q_targets).
+        """
+        if not trajs:
+            return []
+        lengths = [len(t) for t in trajs]
+        states = np.concatenate(
+            [np.asarray([e[S_STATE] for e in t], dtype=np.float32) for t in trajs])
+        masks = np.concatenate(
+            [np.asarray([e[S_MASK] for e in t], dtype=bool) for t in trajs])
+
+        # The only two GPU calls, over the whole rollout's states at once.
+        S = tf.convert_to_tensor(states)
+        M = tf.convert_to_tensor(masks)
+        Q_all = self.critic(S, training=False).numpy()
+        pi_all = masked_softmax(self.actor(S, training=False), M).numpy()
+        V_all = np.sum(pi_all * Q_all, axis=1)
+
+        out = []
+        off = 0
+        for t, L in zip(trajs, lengths):
+            sl = slice(off, off + L)
+            off += L
+            actions = np.asarray([e[S_ACTION] for e in t], dtype=np.int32)
+            rewards = np.asarray([e[S_REWARD] for e in t], dtype=np.float32)
+            dones = np.asarray([e[S_DONE] for e in t], dtype=np.float32)
+            logps = np.asarray([e[S_LOGP] for e in t], dtype=np.float32)
+            Qsa = Q_all[sl][np.arange(L), actions]
+            adv, qt = self._trace(rewards, dones, V_all[sl], Qsa)
+            out.append((states[sl], actions, logps, masks[sl],
+                        adv.astype(np.float32), qt.astype(np.float32)))
+        return out
+
     # ------------------------------------------------------------------ #
     # Update: K_actor clipped-policy epochs, then K_critic regression epochs
     # ------------------------------------------------------------------ #
