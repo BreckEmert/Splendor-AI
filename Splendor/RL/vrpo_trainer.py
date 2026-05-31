@@ -122,9 +122,11 @@ class VRPOAgent:
         self.snapshot_every = _envi('VRPO_SNAPSHOT_EVERY', 50)
 
         # Evaluation cadence (0 disables). Strength = greedy win-rate vs the
-        # fixed DQN inference model. eval_games is a binomial sample over random
-        # boards, so more games => less metric noise.
-        self.eval_every = _envi('VRPO_EVAL_EVERY', 25)
+        # fixed DQN inference model. The eval is the expensive periodic step
+        # (eval_games self-play games each), so 100 keeps overhead low while
+        # still giving ~30 points over a 3000-iter run. eval_games is a binomial
+        # sample over random boards, so more games => less metric noise.
+        self.eval_every = _envi('VRPO_EVAL_EVERY', 100)
         self.eval_games = _envi('VRPO_EVAL_GAMES', 80)
 
         # Best-checkpoint tracking (periodic saves capture the last iter, which
