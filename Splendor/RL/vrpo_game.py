@@ -90,43 +90,101 @@ class VRPOGame(RLGame):
 
 
 def collect_vectorized(agent, players_template, n_parallel, rollout_size,
-                       max_half_turns):
+                       max_half_turns, league=None, league_prob=0.0):
     """Run n_parallel VRPOGames in lockstep, batching the policy forward pass.
 
     players_template: list of (name, agent, pos) reused for every game.
-    Returns (trajectories, game_lengths) where trajectories is a list of
-    (seat0, seat1) tuples for each FINISHED game.
+    Returns (trajectories, game_lengths): trajectories is a list of
+    (seat0_traj, seat1_traj) per finished game (one side empty for league games).
+
+    League play: if `league` is given and non-empty, each game independently has
+    probability `league_prob` of being a LEARNER-vs-FROZEN game - one seat is the
+    current agent (learner), the other a random frozen snapshot. Only the
+    learner's trajectory is returned for those games (the frozen opponent is just
+    environment), keeping the update on-policy. The remaining games are ordinary
+    self-play (both seats = agent, both seats collected). When league is None/
+    empty this is exactly the original pure-self-play loop.
     """
     games = [VRPOGame(players_template, agent, max_half_turns=max_half_turns)
              for _ in range(n_parallel)]
-    for g in games:
+    use_league = league is not None and len(league) > 0
+
+    def assign(g, counter):
+        """(Re)start a game and assign its per-seat policies + learner seat."""
         g.reset()
+        if use_league and np.random.rand() < league_prob:
+            learner = counter % 2                 # alternate learner seat
+            opp = league.sample()
+            g.learner_seat = learner
+            g.seat_policies = [None, None]
+            g.seat_policies[learner] = agent
+            g.seat_policies[1 - learner] = opp
+        else:
+            g.learner_seat = None                 # pure self-play: collect both
+            g.seat_policies = [agent, agent]
+
+    for i, g in enumerate(games):
+        assign(g, i)
 
     trajectories = []
     game_lengths = []
     collected = 0
+    counter = n_parallel                          # for learner-seat alternation
 
+    # Fast path: no league -> single batched forward over all games (original).
+    if not use_league:
+        while collected < rollout_size:
+            states = np.empty((n_parallel, agent.state_dim), dtype=np.float32)
+            masks = np.empty((n_parallel, agent.action_dim), dtype=bool)
+            for i, g in enumerate(games):
+                s, m = g.observe()
+                states[i] = s; masks[i] = m
+            actions, logps = agent.act_batch(states, masks)
+            for i, g in enumerate(games):
+                g.step_external(int(actions[i]), float(logps[i]))
+                if g.victor or g.half_turns >= max_half_turns:
+                    game_lengths.append(g.half_turns)
+                    if not g.victor:
+                        agent._truncated_games += 1
+                    trajectories.append(g._split_seats())
+                    collected += len(g.mem)
+                    g.reset()
+        return trajectories, game_lengths
+
+    # League path: group active games by the policy whose turn it is, batch each.
     while collected < rollout_size:
-        # 1) Gather observations from all live games.
-        states = np.empty((n_parallel, agent.state_dim), dtype=np.float32)
-        masks = np.empty((n_parallel, agent.action_dim), dtype=bool)
-        for i, g in enumerate(games):
+        groups = {}                               # id(pol) -> (pol, [idx...])
+        obs = {}
+        for idx, g in enumerate(games):
             s, m = g.observe()
-            states[i] = s
-            masks[i] = m
+            obs[idx] = (s, m)
+            pol = g.seat_policies[g.half_turns % 2]
+            groups.setdefault(id(pol), (pol, []))[1].append(idx)
 
-        # 2) ONE batched policy forward + sample for all games.
-        actions, logps = agent.act_batch(states, masks)
+        decided = {}                              # idx -> (action, logp)
+        for pol, idxs in groups.values():
+            S = np.asarray([obs[i][0] for i in idxs], dtype=np.float32)
+            M = np.asarray([obs[i][1] for i in idxs], dtype=bool)
+            a, lp = pol.act_batch(S, M)
+            for k, i in enumerate(idxs):
+                decided[i] = (int(a[k]), float(lp[k]))
 
-        # 3) Apply each action to its game; finalize + recycle finished slots.
-        for i, g in enumerate(games):
-            g.step_external(int(actions[i]), float(logps[i]))
+        for idx, g in enumerate(games):
+            act, lp = decided[idx]
+            g.step_external(act, lp)
             if g.victor or g.half_turns >= max_half_turns:
                 game_lengths.append(g.half_turns)
                 if not g.victor:
                     agent._truncated_games += 1
-                trajectories.append(g._split_seats())
-                collected += len(g.mem)
-                g.reset()                      # recycle the slot
+                if g.learner_seat is None:
+                    s0, s1 = g._split_seats()
+                    trajectories.append((s0, s1))
+                    collected += len(s0) + len(s1)
+                else:
+                    learner_traj = [e for e in g.mem if e[7] == g.learner_seat]
+                    trajectories.append((learner_traj, []))
+                    collected += len(learner_traj)
+                assign(g, counter)
+                counter += 1
 
     return trajectories, game_lengths

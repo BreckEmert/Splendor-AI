@@ -13,6 +13,7 @@ import numpy as np
 from .vrpo_trainer import VRPOAgent
 from .vrpo_game import collect_vectorized
 from .vrpo_eval import evaluate_vectorized, KerasGreedyOpponent
+from .vrpo_league import LeaguePool
 
 
 def _load_dqn_opponent(paths):
@@ -40,18 +41,33 @@ def vrpo_loop(paths, iterations=5000, save_every=50, log_every=1,
 
     dqn_opp = _load_dqn_opponent(paths) if agent.eval_every else None
 
+    # League: bounded pool of frozen past-self snapshots. Seed immediately so
+    # there is an opponent from iter 0 (useful when resuming a strong model).
+    league = None
+    if agent.league_on:
+        league = LeaguePool(agent.league_pool, agent.state_dim,
+                            agent.action_dim, paths['layer_sizes'])
+        league.add(agent.actor)
+        print(f"League ON: pool<= {agent.league_pool}, prob={agent.league_prob}, "
+              f"snapshot every {agent.snapshot_every} iters.")
+
     print(f"Starting VRPO: {iterations} iterations, "
           f"~{agent.rollout_size} transitions/iter.")
 
     for it in range(iterations):
         agent.iteration = it
 
+        # Periodically snapshot the current actor into the league pool.
+        if league is not None and it > 0 and it % agent.snapshot_every == 0:
+            league.add(agent.actor)
+
         # --- Collect an on-policy rollout (vectorized: G games in lockstep) ---
         batch_S, batch_A, batch_LP, batch_MK, batch_ADV, batch_QT = \
             [], [], [], [], [], []
         trajectories, game_lengths = collect_vectorized(
             agent, players, agent.parallel_games,
-            agent.rollout_size, agent.max_half_turns)
+            agent.rollout_size, agent.max_half_turns,
+            league=league, league_prob=(agent.league_prob if league else 0.0))
         for seat0, seat1 in trajectories:
             for traj in (seat0, seat1):
                 if not traj:
@@ -90,7 +106,8 @@ def vrpo_loop(paths, iterations=5000, save_every=50, log_every=1,
                   f"ratio={metrics['mean_ratio']:.3f} "
                   f"clipfrac={metrics['clip_fraction']:.3f} "
                   f"lr={agent._current_lr():.2e} "
-                  f"avg_turns={np.mean(game_lengths)/2:.1f}")
+                  f"avg_turns={np.mean(game_lengths)/2:.1f}"
+                  + (f" league={len(league)}" if league is not None else ""))
 
         if save_every and it > 0 and it % save_every == 0:
             agent.save_model()

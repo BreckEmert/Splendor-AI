@@ -101,6 +101,14 @@ class VRPOAgent:
         self.critic_buffer_rollouts = _envi('VRPO_CRITIC_BUFFER', 4)
         self._critic_buf = deque(maxlen=self.critic_buffer_rollouts)
 
+        # League / past-self opponents (opt-in). When on, a fraction of rollout
+        # games pit the learner vs a frozen snapshot from a bounded pool; only
+        # the learner's transitions train. Counters self-play localization.
+        self.league_on = _envi('VRPO_LEAGUE', 0)
+        self.league_prob = _envf('VRPO_LEAGUE_PROB', 0.5)
+        self.league_pool = _envi('VRPO_LEAGUE_POOL', 5)
+        self.snapshot_every = _envi('VRPO_SNAPSHOT_EVERY', 50)
+
         # Evaluation cadence (0 disables). Strength = greedy win-rate vs the
         # fixed DQN inference model. eval_games is a binomial sample over random
         # boards, so more games => less metric noise.
@@ -121,6 +129,8 @@ class VRPOAgent:
             'actor_lr': self.actor_lr, 'critic_lr': self.critic_lr,
             'critic_buffer_rollouts': self.critic_buffer_rollouts,
             'total_iters': self.total_iters,
+            'league_on': self.league_on, 'league_prob': self.league_prob,
+            'league_pool': self.league_pool, 'snapshot_every': self.snapshot_every,
         }
 
         layer_sizes = paths['layer_sizes']
