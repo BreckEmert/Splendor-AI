@@ -52,6 +52,14 @@ def _envi(name, default):
     return int(os.getenv(name, default))
 
 
+def _parse_layers(s, default):
+    """Parse '1024-1024-512' or '1024,1024,512' -> [1024,1024,512]. Empty/None
+    falls back to `default` (the actor layer sizes)."""
+    if not s:
+        return list(default)
+    return [int(x) for x in s.replace(',', '-').split('-') if x.strip()]
+
+
 class VRPOAgent:
     def __init__(self, paths):
         print("Making a new VRPOAgent.")
@@ -139,9 +147,19 @@ class VRPOAgent:
 
         layer_sizes = paths['layer_sizes']
         print("Building VRPO actor & critic with layer sizes", layer_sizes)
+        # Critic can be sized independently of the actor (VRPO_CRITIC_LAYERS).
+        # The critic has the harder job (Q for every action) and critic_loss has
+        # been the standing bottleneck (~13, never improving), so a bigger/deeper
+        # critic is worth testing while the actor stays small. Defaults to the
+        # actor's layer sizes (unchanged behaviour when unset).
+        self.critic_layers = _parse_layers(os.getenv('VRPO_CRITIC_LAYERS'),
+                                           layer_sizes)
+        self.config['critic_layers'] = self.critic_layers
+
         print("VRPO config:", self.config)
         self.actor = build_actor(self.state_dim, self.action_dim, layer_sizes)
-        self.critic = build_critic(self.state_dim, self.action_dim, layer_sizes)
+        self.critic = build_critic(self.state_dim, self.action_dim,
+                                   self.critic_layers)
 
         # Optionally resume weights from a prior run (weights-only, compile=False
         # so we never deserialize a saved optimizer/schedule). VRPO_RESUME points
@@ -183,9 +201,15 @@ class VRPOAgent:
         self.actor.set_weights(a.get_weights())
         print(f"Resumed actor weights <- {actor_path}")
         if os.path.exists(critic_path):
-            c = load_model(critic_path, compile=False)
-            self.critic.set_weights(c.get_weights())
-            print(f"Resumed critic weights <- {critic_path}")
+            try:
+                c = load_model(critic_path, compile=False)
+                self.critic.set_weights(c.get_weights())
+                print(f"Resumed critic weights <- {critic_path}")
+            except Exception as e:
+                # Expected when VRPO_CRITIC_LAYERS changes the critic arch: the
+                # actor resumes, the (now bigger) critic just starts fresh.
+                print(f"WARNING: critic arch differs from checkpoint "
+                      f"({type(e).__name__}); critic starts fresh.")
         else:
             print(f"WARNING: critic checkpoint not found at {critic_path}; "
                   f"critic starts fresh.")

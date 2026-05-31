@@ -31,6 +31,11 @@ def _config_suffix():
         val = os.getenv(env)
         if val is not None:
             parts.append(f"{tag}{val}")
+    # Critic layers: sanitize dashes to 'x' so the tag stays one token in the
+    # run name (e.g. crit1024x1024x512), distinct from the actor's a-b-c block.
+    cl = os.getenv('VRPO_CRITIC_LAYERS')
+    if cl is not None:
+        parts.append("crit" + cl.replace(',', '-').replace('-', 'x'))
     return ("__" + "_".join(parts)) if parts else ""
 
 
