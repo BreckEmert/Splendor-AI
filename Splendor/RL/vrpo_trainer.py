@@ -8,21 +8,19 @@ Faithful to the paper's algorithm:
   - Q-boosting advantage from a multi-step Expected SARSA(lambda) trace,
     with V^pi(s) = sum_a pi(a|s) Q(s,a) (a policy expectation, not a sample).
   - PPO clipped surrogate, ratio measured against the behavior (rollout) policy.
-  - KL(pi || Uniform) regularization to promote exploration (the paper's L^reg).
-    Minimizing KL(pi||U) == maximizing policy entropy, so kl_coef IS the
-    exploration knob.
+  - KL(pi || Uniform) regularization (the paper's L^reg). Minimizing KL(pi||U)
+    == maximizing entropy, so kl_coef IS the exploration knob. Splendor punishes
+    "falling off" (resources clog), so sustained-but-low exploration is right;
+    the policy also sharpens naturally as it learns. kl_coef can ANNEAL from a
+    start to an end value so exploration eases off late (see kl_coef_end).
 
-Documented deviations (pragmatic, for a single 16GB GPU; each is an isolated
-swap point):
+Documented deviations (pragmatic, single 16GB GPU; each an isolated swap point):
   - Adam instead of the paper's Muon optimizer.
-  - Advantages/targets are computed once per iteration at the rollout policy
-    (standard PPO practice) rather than re-deriving the policy-expectation
-    terms inside every actor minibatch.
-  - The critic trains on the current rollout only; the paper's cyclic critic
-    replay buffer is left as a clearly marked TODO below.
+  - Advantages/targets computed once per iteration at the rollout policy
+    (standard PPO) rather than re-derived inside every actor minibatch.
 
-Hyperparameters are overridable via environment variables (for cheap grid
-search without editing code), e.g.:  VRPO_KL_COEF=0.05 python train_vrpo.py
+Hyperparameters are env-overridable for grid search, e.g.:
+    VRPO_KL_COEF=0.06 VRPO_KL_COEF_END=0.01 python train_vrpo.py
 """
 
 import os
@@ -33,17 +31,16 @@ from collections import deque
 import numpy as np
 import tensorflow as tf
 from keras.optimizers import Adam
-
 from keras.models import load_model
 
 from .vrpo_model import (
-    build_actor, build_critic, NEG_INF, WarmupDecaySchedule,
+    build_actor, build_critic, NEG_INF, WarmupCosineSchedule,
     masked_log_softmax, masked_softmax,
 )
 
-# Indices into a collected transition (see vrpo_game.VRPOGame.turn).
-# First six match the existing DQN memory layout so apply_move's end-of-game
-# poke (memory[-1][2] += loser_reward; memory[-1][5] = True) still works.
+# Indices into a collected transition (see vrpo_game.VRPOGame._commit).
+# First six match the DQN memory layout so apply_move's end-of-game poke
+# (memory[-1][2] += loser_reward; memory[-1][5] = True) still works.
 S_STATE, S_ACTION, S_REWARD, S_NEXT, S_MASK, S_DONE, S_LOGP, S_SEAT = range(8)
 
 
@@ -64,11 +61,10 @@ class VRPOAgent:
         self.state_dim = 251
         self.action_dim = 141
 
-        # --- Hyperparameters (env-overridable) ---
+        # --- Core hyperparameters (env-overridable) ---
         self.gamma = _envf('VRPO_GAMMA', 0.99)        # discount per own-decision step
         self.lam = _envf('VRPO_LAMBDA', 0.95)         # Expected SARSA(lambda) trace
         self.clip_eps = _envf('VRPO_CLIP', 0.2)       # PPO clip coefficient
-        self.kl_coef = _envf('VRPO_KL_COEF', 0.03)    # exploration knob (KL-to-uniform)
         self.actor_epochs = _envi('VRPO_ACTOR_EPOCHS', 4)    # K_actor
         self.critic_epochs = _envi('VRPO_CRITIC_EPOCHS', 4)  # K_critic
         self.minibatches = _envi('VRPO_MINIBATCHES', 4)      # M
@@ -78,44 +74,53 @@ class VRPOAgent:
         self.actor_lr = _envf('VRPO_ACTOR_LR', 3e-4)
         self.critic_lr = _envf('VRPO_CRITIC_LR', 3e-4)
 
-        # LR schedule (warmup + gentle exponential decay), on by default - the
-        # DQN uses an analogous warmup/decay schedule; VRPO previously ran flat
-        # Adam. Steps are optimizer steps (~minibatches*epochs per iteration).
-        self.lr_schedule_on = _envi('VRPO_LR_SCHEDULE', 1)
-        self.lr_warmup_steps = _envi('VRPO_LR_WARMUP_STEPS', 200)
-        self.lr_decay_steps = _envi('VRPO_LR_DECAY_STEPS', 4000)
-        self.lr_decay_rate = _envf('VRPO_LR_DECAY_RATE', 0.5)
-        self.lr_min_frac = _envf('VRPO_LR_MIN_FRAC', 0.1)
+        # Exploration: KL-to-uniform coefficient. Default 0.06 is the proven
+        # baseline (held vs_dqn without regression in tuning). Optionally anneal
+        # from kl_coef -> kl_coef_end over the run so it sharpens late; default
+        # end == start (constant) so behaviour is unchanged unless opted in.
+        self.kl_coef_start = _envf('VRPO_KL_COEF', 0.06)
+        self.kl_coef_end = _envf('VRPO_KL_COEF_END', self.kl_coef_start)
+        self.kl_coef_var = tf.Variable(self.kl_coef_start, trainable=False,
+                                       dtype=tf.float32)
 
-        # Cyclic critic replay buffer (the paper's design; previously a TODO).
-        # Retains (state, action, q_target) from the last N rollouts so the
-        # critic trains on more, decorrelated data instead of a single rollout
-        # it immediately discards. 1 == old behaviour (current rollout only).
-        # Targets from older rollouts are mildly stale (computed by a recent
-        # critic), which is the standard accuracy/variance trade-off; keeping N
-        # small (~4) bounds that staleness.
+        # Total planned iterations (for LR/KL horizons). Read from env so it
+        # matches train_vrpo's VRPO_ITERS; loop may pass fewer (tests) - then
+        # the schedules just stay near their start, which is harmless.
+        self.total_iters = _envi('VRPO_ITERS', 5000)
+        self.steps_per_iter = self.minibatches * self.actor_epochs
+
+        # LR schedule (warmup + horizon-matched cosine decay), on by default.
+        self.lr_schedule_on = _envi('VRPO_LR_SCHEDULE', 1)
+        self.lr_warmup_steps = _envi('VRPO_LR_WARMUP_STEPS', 150)
+        self.lr_min_frac = _envf('VRPO_LR_MIN_FRAC', 0.2)
+
+        # Cyclic critic replay buffer (the paper's design). Retains the last N
+        # rollouts of (state, action, q_target) so the critic trains on more,
+        # decorrelated data instead of one rollout it discards. 1 == old single-
+        # rollout behaviour. Older targets are mildly stale; small N bounds that.
         self.critic_buffer_rollouts = _envi('VRPO_CRITIC_BUFFER', 4)
         self._critic_buf = deque(maxlen=self.critic_buffer_rollouts)
 
-        # Evaluation cadence (0 disables in-loop eval). eval_games is a binomial
-        # sample over RANDOM BOARDS (decks reshuffle each game), so more games
-        # reduces metric noise even though both policies are deterministic.
+        # Evaluation cadence (0 disables). Strength = greedy win-rate vs the
+        # fixed DQN inference model. eval_games is a binomial sample over random
+        # boards, so more games => less metric noise.
         self.eval_every = _envi('VRPO_EVAL_EVERY', 25)
         self.eval_games = _envi('VRPO_EVAL_GAMES', 80)
-        # Best-checkpoint tracking: periodic saves capture the LAST iter, which
-        # may be past the peak (the policy can over-sharpen and regress). Track
-        # the best eval so we never lose the strongest model.
+
+        # Best-checkpoint tracking (periodic saves capture the last iter, which
+        # may be past a peak; keep the best-by-vs_dqn model separately).
         self.best_eval = -1.0
         self.best_eval_iter = -1
 
-        # Config snapshot for logging / run naming
+        # Config snapshot for logging / reproducibility.
         self.config = {
             'gamma': self.gamma, 'lam': self.lam, 'clip_eps': self.clip_eps,
-            'kl_coef': self.kl_coef, 'actor_epochs': self.actor_epochs,
-            'critic_epochs': self.critic_epochs, 'minibatches': self.minibatches,
-            'rollout_size': self.rollout_size, 'actor_lr': self.actor_lr,
-            'critic_lr': self.critic_lr,
+            'kl_coef_start': self.kl_coef_start, 'kl_coef_end': self.kl_coef_end,
+            'actor_epochs': self.actor_epochs, 'critic_epochs': self.critic_epochs,
+            'minibatches': self.minibatches, 'rollout_size': self.rollout_size,
+            'actor_lr': self.actor_lr, 'critic_lr': self.critic_lr,
             'critic_buffer_rollouts': self.critic_buffer_rollouts,
+            'total_iters': self.total_iters,
         }
 
         layer_sizes = paths['layer_sizes']
@@ -131,10 +136,12 @@ class VRPOAgent:
         if resume:
             self._resume_weights(resume)
 
-        actor_lr = self._make_lr(self.actor_lr)
-        critic_lr = self._make_lr(self.critic_lr)
-        self.actor_opt = Adam(learning_rate=actor_lr, clipnorm=1.0)
-        self.critic_opt = Adam(learning_rate=critic_lr, clipnorm=1.0)
+        # Build LR schedules (kept as handles so logging can resolve current LR
+        # reliably across Keras versions - opt.learning_rate readback is flaky).
+        self._actor_sched = self._make_lr(self.actor_lr)
+        self._critic_sched = self._make_lr(self.critic_lr)
+        self.actor_opt = Adam(learning_rate=self._actor_sched, clipnorm=1.0)
+        self.critic_opt = Adam(learning_rate=self._critic_sched, clipnorm=1.0)
 
         # Collection interface used by VRPOGame + reused apply_move.
         self.memory: list = []
@@ -144,13 +151,17 @@ class VRPOAgent:
         self.iteration = 0
         self._truncated_games = 0
 
+    # ------------------------------------------------------------------ #
+    # Setup helpers
+    # ------------------------------------------------------------------ #
     def _make_lr(self, peak):
         if not self.lr_schedule_on:
             return peak
-        return WarmupDecaySchedule(
+        total_steps = max(self.total_iters * self.steps_per_iter,
+                          self.lr_warmup_steps + 1)
+        return WarmupCosineSchedule(
             peak_lr=peak, warmup_steps=self.lr_warmup_steps,
-            decay_steps=self.lr_decay_steps, decay_rate=self.lr_decay_rate,
-            min_lr=peak * self.lr_min_frac)
+            total_steps=total_steps, min_lr=peak * self.lr_min_frac)
 
     def _resume_weights(self, actor_path):
         critic_path = actor_path.replace('_actor.keras', '_critic.keras')
@@ -170,9 +181,13 @@ class VRPOAgent:
         with self.tensorboard.as_default():
             tf.summary.text('VRPO/config', text, step=0)
 
-    # ------------------------------------------------------------------ #
-    # Collection interface (apply_move calls self.model.memory / remember)
-    # ------------------------------------------------------------------ #
+    def _current_kl_coef(self):
+        """Linearly anneal kl_coef start->end across the planned run."""
+        if self.kl_coef_end == self.kl_coef_start or self.total_iters <= 1:
+            return self.kl_coef_start
+        frac = min(1.0, self.iteration / float(self.total_iters))
+        return self.kl_coef_start + (self.kl_coef_end - self.kl_coef_start) * frac
+
     def remember(self, entry) -> None:
         self.memory.append(entry)
 
@@ -180,39 +195,29 @@ class VRPOAgent:
     # Acting
     # ------------------------------------------------------------------ #
     def act(self, state, mask):
-        """SAMPLE a legal move from the current policy; return (action, logp).
-        Single-row path (kept for the non-vectorized game loop / tests).
-        """
+        """SAMPLE a legal move (single-row path; tests / non-vectorized loop)."""
         s = tf.convert_to_tensor(state[None, :], dtype=tf.float32)
         m = tf.convert_to_tensor(mask[None, :], dtype=tf.bool)
-        logits = self.actor(s, training=False)
-        logp = masked_log_softmax(logits, m)[0]
+        logp = masked_log_softmax(self.actor(s, training=False), m)[0]
         action = int(tf.random.categorical(logp[None, :], 1)[0, 0].numpy())
         return action, float(logp[action].numpy())
 
     @tf.function(reduce_retracing=True)
     def _act_batch_tf(self, S, M):
-        logits = self.actor(S, training=False)
-        logp_all = masked_log_softmax(logits, M)             # (G, A)
-        actions = tf.random.categorical(logp_all, 1)[:, 0]   # (G,)
-        logps = tf.gather(logp_all, actions, batch_dims=1)   # (G,)
+        logp_all = masked_log_softmax(self.actor(S, training=False), M)
+        actions = tf.random.categorical(logp_all, 1)[:, 0]
+        logps = tf.gather(logp_all, actions, batch_dims=1)
         return actions, logps
 
     def act_batch(self, states, masks):
-        """SAMPLE one legal move per game for a BATCH of states/masks.
-        Returns (actions[int32], logps[float32]) as numpy. This is the call
-        that makes the vectorized rollout fast: one forward pass for G games.
-        """
+        """SAMPLE one legal move per game for a BATCH (fast vectorized rollout)."""
         S = tf.convert_to_tensor(states, dtype=tf.float32)
         M = tf.convert_to_tensor(masks, dtype=tf.bool)
         actions, logps = self._act_batch_tf(S, M)
         return actions.numpy().astype(np.int32), logps.numpy().astype(np.float32)
 
     def get_predictions(self, state, mask):
-        """GREEDY interface compatible with Player.choose_move (which argmaxes).
-        Returns masked logits so argmax == best legal action. Used for
-        evaluation and could back an inference/webapp agent later.
-        """
+        """GREEDY interface compatible with Player.choose_move (argmax)."""
         s = tf.convert_to_tensor(state[None, :], dtype=tf.float32)
         m = tf.convert_to_tensor(mask[None, :], dtype=tf.bool)
         logits = self.actor(s, training=False)[0]
@@ -225,15 +230,13 @@ class VRPOAgent:
         return tf.argmax(masked, axis=1, output_type=tf.int32)
 
     def predict_batch(self, states, masks):
-        """Batched GREEDY argmax actions (for the vectorized evaluator). Same
-        rule as get_predictions+argmax, one forward pass for many states.
-        """
+        """Batched GREEDY argmax actions (for the vectorized evaluator)."""
         S = tf.convert_to_tensor(states, dtype=tf.float32)
         M = tf.convert_to_tensor(masks, dtype=tf.bool)
         return self._greedy_batch_tf(S, M).numpy()
 
     # ------------------------------------------------------------------ #
-    # Q-boosting: turn one seat's trajectory into advantages + Q targets
+    # Q-boosting: one seat's trajectory -> advantages + Q targets
     # ------------------------------------------------------------------ #
     def process_trajectory(self, traj):
         states = np.asarray([e[S_STATE] for e in traj], dtype=np.float32)
@@ -253,8 +256,7 @@ class VRPOAgent:
         # Backward Expected SARSA(lambda) trace:
         #   delta_t = r_t + gamma*(1-done)*V^pi(s_{t+1}) - Q(s_t,a_t)
         #   G_t     = delta_t + (lambda*gamma)*(1-done)*G_{t+1}
-        #   A_t     = (Q(s_t,a_t) - V^pi(s_t)) + G_t
-        #   Qtarget = Q(s_t,a_t) + G_t
+        #   A_t     = (Q(s_t,a_t) - V^pi(s_t)) + G_t ;  Qtarget = Q(s_t,a_t) + G_t
         L = len(traj)
         G = np.zeros(L, dtype=np.float32)
         gl = self.gamma * self.lam
@@ -275,6 +277,9 @@ class VRPOAgent:
     # Update: K_actor clipped-policy epochs, then K_critic regression epochs
     # ------------------------------------------------------------------ #
     def update(self, states, actions, logp_old, masks, adv, q_target):
+        # Set the (possibly annealed) KL coefficient for this iteration.
+        self.kl_coef_var.assign(self._current_kl_coef())
+
         N = len(states)
         S = tf.convert_to_tensor(states, tf.float32)
         A = tf.convert_to_tensor(actions, tf.int32)
@@ -288,7 +293,6 @@ class VRPOAgent:
 
         mb = max(1, N // self.minibatches)
 
-        # Accumulate over ALL minibatch steps for stable logging (not just last).
         acc = {'pg': 0.0, 'kl': 0.0, 'ent': 0.0, 'ratio': 0.0,
                'clipfrac': 0.0, 'approx_kl': 0.0}
         a_steps = 0
@@ -298,18 +302,13 @@ class VRPOAgent:
                 b = order[start:start + mb]
                 pg, kl, ent, ratio, clipfrac, approx_kl = self._actor_step(
                     tf.gather(S, b), tf.gather(A, b), tf.gather(LP, b),
-                    tf.gather(MK, b), tf.gather(ADV, b)
-                )
+                    tf.gather(MK, b), tf.gather(ADV, b))
                 acc['pg'] += float(pg); acc['kl'] += float(kl)
                 acc['ent'] += float(ent); acc['ratio'] += float(ratio)
-                acc['clipfrac'] += float(clipfrac)
-                acc['approx_kl'] += float(approx_kl)
+                acc['clipfrac'] += float(clipfrac); acc['approx_kl'] += float(approx_kl)
                 a_steps += 1
 
-        # --- Critic phase: train over the cyclic replay buffer ---
-        # Add this rollout's (state, action, q_target) to the buffer, then
-        # regress the critic across ALL retained rollouts. This gives the critic
-        # several rollouts' worth of data per iteration instead of one.
+        # --- Critic phase over the cyclic replay buffer ---
         self._critic_buf.append((states, actions, q_target))
         cb_S = tf.convert_to_tensor(
             np.concatenate([r[0] for r in self._critic_buf]), tf.float32)
@@ -340,11 +339,10 @@ class VRPOAgent:
             'critic_loss': critic_sum / c_steps,
         }
 
-    @tf.function
+    @tf.function(reduce_retracing=True)
     def _actor_step(self, S, A, LP_old, MK, ADV):
         with tf.GradientTape() as tape:
-            logits = self.actor(S, training=True)
-            logp_all = masked_log_softmax(logits, MK)
+            logp_all = masked_log_softmax(self.actor(S, training=True), MK)
             idx = tf.stack([tf.range(tf.shape(A)[0]), A], axis=1)
             logp = tf.gather_nd(logp_all, idx)
 
@@ -363,19 +361,18 @@ class VRPOAgent:
             kl = neg_entropy + tf.math.log(n_legal)
             kl_loss = tf.reduce_mean(kl)
 
-            loss = pg_loss + self.kl_coef * kl_loss
+            loss = pg_loss + self.kl_coef_var * kl_loss
 
         grads = tape.gradient(loss, self.actor.trainable_variables)
         self.actor_opt.apply_gradients(zip(grads, self.actor.trainable_variables))
 
-        # Diagnostics (no grad)
         clip_frac = tf.reduce_mean(
             tf.cast(tf.greater(tf.abs(ratio - 1.0), self.clip_eps), tf.float32))
-        approx_kl = tf.reduce_mean(LP_old - logp)   # behavior -> current
+        approx_kl = tf.reduce_mean(LP_old - logp)
         return (pg_loss, kl_loss, tf.reduce_mean(entropy),
                 tf.reduce_mean(ratio), clip_frac, approx_kl)
 
-    @tf.function
+    @tf.function(reduce_retracing=True)
     def _critic_step(self, S, A, QT):
         with tf.GradientTape() as tape:
             Q = self.critic(S, training=True)
@@ -389,6 +386,11 @@ class VRPOAgent:
     # ------------------------------------------------------------------ #
     # Logging / saving
     # ------------------------------------------------------------------ #
+    def _current_lr(self):
+        if callable(self._actor_sched):
+            return float(self._actor_sched(self.actor_opt.iterations))
+        return float(self._actor_sched)
+
     def log_iteration(self, metrics, game_lengths, adv, q_target):
         step = self.iteration
         with self.tensorboard.as_default():
@@ -398,40 +400,25 @@ class VRPOAgent:
             tf.summary.scalar('VRPO/adv_mean', float(np.mean(adv)), step=step)
             tf.summary.scalar('VRPO/adv_std', float(np.std(adv)), step=step)
             tf.summary.scalar('VRPO/q_target_mean', float(np.mean(q_target)), step=step)
+            tf.summary.scalar('VRPO/kl_coef', float(self.kl_coef_var.numpy()), step=step)
+            tf.summary.scalar('VRPO/actor_lr', self._current_lr(), step=step)
             if game_lengths:
+                # Secondary proxy only: game length tracks strength while it is
+                # shrinking, but decouples once it stagnates. vs_dqn is truth.
                 tf.summary.scalar('VRPO/game_length',
                                   float(np.mean(game_lengths)) / 2.0, step=step)
             tf.summary.scalar('VRPO/truncated_games_total',
                               self._truncated_games, step=step)
-            # Current LR (resolve schedule at the optimizer's step count).
-            lr = self.actor_opt.learning_rate
-            if callable(lr):
-                lr = lr(self.actor_opt.iterations)
-            tf.summary.scalar('VRPO/actor_lr', float(lr), step=step)
         self.tensorboard.flush()
 
-    def log_eval(self, wr_dqn, draws_dqn, wr_random, draws_random):
-        step = self.iteration
+    def log_eval(self, wr_dqn):
         with self.tensorboard.as_default():
-            tf.summary.scalar('Eval/winrate_vs_dqn', wr_dqn, step=step)
-            tf.summary.scalar('Eval/draws_vs_dqn', draws_dqn, step=step)
-            tf.summary.scalar('Eval/winrate_vs_random', wr_random, step=step)
-            tf.summary.scalar('Eval/draws_vs_random', draws_random, step=step)
+            tf.summary.scalar('Eval/winrate_vs_dqn', wr_dqn, step=self.iteration)
         self.tensorboard.flush()
-
-    def save_model(self) -> None:
-        self.actor.save(self.paths['actor_save_path'])
-        self.critic.save(self.paths['critic_save_path'])
-        print(f"Saved actor -> {self.paths['actor_save_path']}")
-        print(f"Saved critic -> {self.paths['critic_save_path']}")
 
     def maybe_save_best(self, eval_value) -> bool:
-        """Save to the stable *_best.keras paths if this is the best eval so
-        far. Returns True if a new best was saved. NaN values are ignored.
-        """
-        if eval_value != eval_value:          # NaN
-            return False
-        if eval_value <= self.best_eval:
+        """Save *_best.keras if this is the best vs_dqn so far. NaN ignored."""
+        if eval_value != eval_value or eval_value <= self.best_eval:
             return False
         self.best_eval = eval_value
         self.best_eval_iter = self.iteration
@@ -441,6 +428,12 @@ class VRPOAgent:
             tf.summary.scalar('Eval/best_winrate', self.best_eval,
                               step=self.iteration)
         self.tensorboard.flush()
-        print(f"  ** new best eval={eval_value:.3f} @ iter {self.iteration} "
+        print(f"  ** new best vs_dqn={eval_value:.3f} @ iter {self.iteration} "
               f"-> saved {os.path.basename(self.paths['actor_best_path'])}")
         return True
+
+    def save_model(self) -> None:
+        self.actor.save(self.paths['actor_save_path'])
+        self.critic.save(self.paths['critic_save_path'])
+        print(f"Saved actor -> {self.paths['actor_save_path']}")
+        print(f"Saved critic -> {self.paths['critic_save_path']}")

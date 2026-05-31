@@ -60,6 +60,40 @@ class WarmupDecaySchedule(tf.keras.optimizers.schedules.LearningRateSchedule):
                 "min_lr": self.min_lr}
 
 
+@register_keras_serializable(package="vrpo")
+class WarmupCosineSchedule(tf.keras.optimizers.schedules.LearningRateSchedule):
+    """Linear warmup to peak_lr over warmup_steps, then cosine decay to min_lr
+    across the REMAINDER of the planned training horizon (total_steps). After
+    total_steps it holds at min_lr.
+
+    Horizon-matched: because the decay spans the whole planned run, both short
+    and long runs decay smoothly from peak to floor by the end - unlike a fixed
+    exponential decay, which floored out early on long runs (the reason this
+    replaced WarmupDecaySchedule as the default). Steps are OPTIMIZER steps
+    (~minibatches*actor_epochs per training iteration). On resume the step
+    counter restarts, so warmup + the full decay re-run over the new horizon.
+    """
+    def __init__(self, peak_lr, warmup_steps, total_steps, min_lr):
+        super().__init__()
+        self.peak_lr = float(peak_lr)
+        self.warmup_steps = float(warmup_steps)
+        self.total_steps = float(total_steps)
+        self.min_lr = float(min_lr)
+
+    def __call__(self, step):
+        step = tf.cast(step, tf.float32)
+        warm = self.peak_lr * (step / tf.maximum(self.warmup_steps, 1.0))
+        span = tf.maximum(self.total_steps - self.warmup_steps, 1.0)
+        progress = tf.clip_by_value((step - self.warmup_steps) / span, 0.0, 1.0)
+        cosine = self.min_lr + 0.5 * (self.peak_lr - self.min_lr) * \
+            (1.0 + tf.cos(3.14159265 * progress))
+        return tf.where(step < self.warmup_steps, warm, cosine)
+
+    def get_config(self):
+        return {"peak_lr": self.peak_lr, "warmup_steps": self.warmup_steps,
+                "total_steps": self.total_steps, "min_lr": self.min_lr}
+
+
 def _trunk(state_input, layer_sizes, prefix):
     x = state_input
     for i, n in enumerate(layer_sizes):

@@ -1,33 +1,33 @@
 # Splendor/RL/vrpo_loop.py
 """
 VRPO training loop. Each iteration gathers a fresh batch of self-play
-transitions, converts them to Q-boosting advantages / critic targets, runs the
-clipped policy update + critic regression, and periodically EVALUATES the greedy
-policy head-to-head vs the DQN and vs random (the real strength signal).
+transitions (vectorized), converts them to Q-boosting advantages / critic
+targets, runs the clipped policy update + critic regression, and periodically
+EVALUATES the greedy policy head-to-head vs the fixed DQN inference model -
+the one true strength signal (self-play game length only correlates while it is
+shrinking, so we do not rely on it).
 """
 
 import numpy as np
 
 from .vrpo_trainer import VRPOAgent
-from .vrpo_game import VRPOGame, collect_vectorized
+from .vrpo_game import collect_vectorized
 from .vrpo_eval import evaluate_vectorized, KerasGreedyOpponent
 
 
-def _load_opponents(paths):
-    """Best-effort load of eval opponents; returns (dqn_agent_or_None, random_agent)."""
-    from .random_model import RandomAgent
-    random_opp = RandomAgent(paths)
-
-    dqn_opp = None
+def _load_dqn_opponent(paths):
+    """Load the fixed DQN eval opponent, or None if unavailable."""
     dqn_path = paths.get('dqn_eval_path')
-    if dqn_path:
-        try:
-            dqn_opp = KerasGreedyOpponent(dqn_path)
-            print(f"Eval opponent (DQN) loaded: {dqn_path}")
-        except Exception as e:
-            print(f"WARNING: could not load DQN eval opponent ({e}). "
-                  f"Skipping vs-DQN eval.")
-    return dqn_opp, random_opp
+    if not dqn_path:
+        return None
+    try:
+        opp = KerasGreedyOpponent(dqn_path)
+        print(f"Eval opponent (DQN) loaded: {dqn_path}")
+        return opp
+    except Exception as e:
+        print(f"WARNING: could not load DQN eval opponent ({e}). "
+              f"Skipping eval.")
+        return None
 
 
 def vrpo_loop(paths, iterations=5000, save_every=50, log_every=1,
@@ -38,9 +38,7 @@ def vrpo_loop(paths, iterations=5000, save_every=50, log_every=1,
 
     players = [('Player1', agent, 0), ('Player2', agent, 1)]
 
-    dqn_opp, random_opp = (None, None)
-    if agent.eval_every:
-        dqn_opp, random_opp = _load_opponents(paths)
+    dqn_opp = _load_dqn_opponent(paths) if agent.eval_every else None
 
     print(f"Starting VRPO: {iterations} iterations, "
           f"~{agent.rollout_size} transitions/iter.")
@@ -75,22 +73,14 @@ def vrpo_loop(paths, iterations=5000, save_every=50, log_every=1,
         if log_every and it % log_every == 0:
             agent.log_iteration(metrics, game_lengths, ADV, QT)
 
-        # --- Evaluate (the real strength signal) ---
-        if agent.eval_every and it % agent.eval_every == 0:
-            wr_dqn = dr_dqn = float('nan')
-            if dqn_opp is not None:
-                wr_dqn, _, draws = evaluate_vectorized(
-                    agent, dqn_opp, agent.eval_games, agent.max_half_turns)
-                dr_dqn = draws
-            wr_rnd, _, draws_r = evaluate_vectorized(
-                agent, random_opp, agent.eval_games, agent.max_half_turns)
-            agent.log_eval(wr_dqn, dr_dqn, wr_rnd, draws_r)
-            print(f"[iter {it}] EVAL vs_dqn={wr_dqn:.3f} vs_random={wr_rnd:.3f}")
-
-            # Track best model by vs_dqn (the goal metric), falling back to
-            # vs_random when no DQN opponent is available.
-            best_metric = wr_dqn if dqn_opp is not None else wr_rnd
-            agent.maybe_save_best(best_metric)
+        # --- Evaluate (the real strength signal: vs the fixed DQN) ---
+        if dqn_opp is not None and it % agent.eval_every == 0:
+            wr_dqn, _, _ = evaluate_vectorized(
+                agent, dqn_opp, agent.eval_games, agent.max_half_turns)
+            agent.log_eval(wr_dqn)
+            agent.maybe_save_best(wr_dqn)
+            print(f"[iter {it}] EVAL vs_dqn={wr_dqn:.3f} "
+                  f"(best {agent.best_eval:.3f} @ {agent.best_eval_iter})")
 
         if it % 10 == 0:
             print(f"[iter {it}] pg={metrics['pg_loss']:.4f} "
@@ -99,6 +89,7 @@ def vrpo_loop(paths, iterations=5000, save_every=50, log_every=1,
                   f"critic={metrics['critic_loss']:.4f} "
                   f"ratio={metrics['mean_ratio']:.3f} "
                   f"clipfrac={metrics['clip_fraction']:.3f} "
+                  f"lr={agent._current_lr():.2e} "
                   f"avg_turns={np.mean(game_lengths)/2:.1f}")
 
         if save_every and it > 0 and it % save_every == 0:
