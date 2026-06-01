@@ -9,6 +9,7 @@ shrinking, so we do not rely on it).
 """
 
 import numpy as np
+import tensorflow as tf
 
 from .vrpo_trainer import VRPOAgent
 from .vrpo_game import collect_vectorized
@@ -49,10 +50,13 @@ def vrpo_loop(paths, iterations=5000, save_every=50, log_every=None,
     league = None
     if agent.league_on:
         league = LeaguePool(agent.league_pool, agent.state_dim,
-                            agent.action_dim, paths['layer_sizes'])
+                            agent.action_dim, paths['layer_sizes'],
+                            pfsp=bool(agent.pfsp), pow=agent.pfsp_pow,
+                            eps=agent.pfsp_eps)
         league.add(agent.actor)
         print(f"League ON: pool<= {agent.league_pool}, prob={agent.league_prob}, "
-              f"snapshot every {agent.snapshot_every} iters.")
+              f"snapshot every {agent.snapshot_every} iters, "
+              f"PFSP={'on' if agent.pfsp else 'off'} pow={agent.pfsp_pow}.")
 
     print(f"Starting VRPO: {iterations} iterations, "
           f"~{agent.rollout_size} transitions/iter.")
@@ -99,6 +103,13 @@ def vrpo_loop(paths, iterations=5000, save_every=50, log_every=None,
             agent.maybe_save_best(wr_dqn)
             print(f"[iter {it}] EVAL vs_dqn={wr_dqn:.3f} "
                   f"(best {agent.best_eval:.3f} @ {agent.best_eval_iter})")
+
+        if league is not None and it % agent.eval_every == 0:
+            psize, mwr, n_un = league.stats()
+            with agent.tensorboard.as_default():
+                tf.summary.scalar('League/pool_size', psize, step=it)
+                tf.summary.scalar('League/mean_learner_wr_vs_pool', mwr, step=it)
+            agent.tensorboard.flush()
 
         if it % 10 == 0:
             print(f"[iter {it}] pg={metrics['pg_loss']:.4f} "

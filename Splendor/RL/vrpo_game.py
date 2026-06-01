@@ -184,6 +184,12 @@ def collect_vectorized(agent, players_template, n_parallel, rollout_size,
                     learner_traj = [e for e in g.mem if e[7] == g.learner_seat]
                     trajectories.append((learner_traj, []))
                     collected += len(learner_traj)
+                    # PFSP bookkeeping: record whether the learner beat this opp
+                    # (a truncated/no-victor game counts as a non-win, which is
+                    # the conservative choice). Drives prioritized sampling.
+                    if g.opp_ref is not None:
+                        won = bool(g.victor and g.players[g.learner_seat].victor)
+                        league.record_result(g.opp_ref, won)
                 assign(g, counter)
                 counter += 1
 

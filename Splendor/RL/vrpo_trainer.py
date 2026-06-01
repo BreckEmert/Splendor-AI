@@ -120,6 +120,11 @@ class VRPOAgent:
         self.league_prob = _envf('VRPO_LEAGUE_PROB', 0.5)
         self.league_pool = _envi('VRPO_LEAGUE_POOL', 5)
         self.snapshot_every = _envi('VRPO_SNAPSHOT_EVERY', 50)
+        # PFSP: prioritized opponent sampling. pfsp_pow>0 weights pooled
+        # opponents by (1-learner_winrate)^pow (focus on hard ones); 0 == uniform.
+        self.pfsp = _envi('VRPO_PFSP', 1)
+        self.pfsp_pow = _envf('VRPO_PFSP_POW', 1.0)
+        self.pfsp_eps = _envf('VRPO_PFSP_EPS', 0.05)
 
         # Evaluation cadence (0 disables). Strength = greedy win-rate vs the
         # fixed DQN inference model. The eval is the expensive periodic step
