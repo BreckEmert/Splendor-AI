@@ -116,11 +116,13 @@ def collect_vectorized(agent, players_template, n_parallel, rollout_size,
             learner = counter % 2                 # alternate learner seat
             opp = league.sample()
             g.learner_seat = learner
+            g.opp_ref = opp                       # for PFSP record_result
             g.seat_policies = [None, None]
             g.seat_policies[learner] = agent
             g.seat_policies[1 - learner] = opp
         else:
             g.learner_seat = None                 # pure self-play: collect both
+            g.opp_ref = None
             g.seat_policies = [agent, agent]
 
     for i, g in enumerate(games):
