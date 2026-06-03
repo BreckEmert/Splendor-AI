@@ -90,7 +90,8 @@ class VRPOGame(RLGame):
 
 
 def collect_vectorized(agent, players_template, n_parallel, rollout_size,
-                       max_half_turns, league=None, league_prob=0.0):
+                       max_half_turns, league=None, league_prob=0.0,
+                       reward_cls=None):
     """Run n_parallel VRPOGames in lockstep, batching the policy forward pass.
 
     players_template: list of (name, agent, pos) reused for every game.
@@ -105,7 +106,9 @@ def collect_vectorized(agent, players_template, n_parallel, rollout_size,
     self-play (both seats = agent, both seats collected). When league is None/
     empty this is exactly the original pure-self-play loop.
     """
-    games = [VRPOGame(players_template, agent, max_half_turns=max_half_turns)
+    gkw = {} if reward_cls is None else {'reward_cls': reward_cls}
+    games = [VRPOGame(players_template, agent, max_half_turns=max_half_turns,
+                      **gkw)
              for _ in range(n_parallel)]
     use_league = league is not None and len(league) > 0
 

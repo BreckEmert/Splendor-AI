@@ -43,6 +43,16 @@ def vrpo_loop(paths, iterations=5000, save_every=50, log_every=None,
 
     players = [('Player1', agent, 0), ('Player2', agent, 1)]
 
+    # Reward engine: use the shaping->sparse blend if an anneal was requested
+    # (shape_alpha_end != start), else the default full-shaping BasicRewardEngine.
+    reward_cls = None
+    if agent.shape_alpha_end != agent.shape_alpha_start:
+        from .rewards import BlendedRewardEngine
+        reward_cls = BlendedRewardEngine
+        print(f"Reward anneal ON: shaping_alpha {agent.shape_alpha_start} -> "
+              f"{agent.shape_alpha_end} over schedule frac "
+              f"[{agent.shape_anneal_start_frac}, {agent.shape_anneal_end_frac}].")
+
     dqn_opp = _load_dqn_opponent(paths) if agent.eval_every else None
 
     # League: bounded pool of frozen past-self snapshots. Seed immediately so
@@ -64,6 +74,10 @@ def vrpo_loop(paths, iterations=5000, save_every=50, log_every=None,
     for it in range(iterations):
         agent.iteration = it
 
+        # Refresh annealed values the ROLLOUT depends on (shaping_alpha) before
+        # collecting games. (kl_coef is refreshed inside agent.update.)
+        agent.update_schedules()
+
         # Periodically snapshot the current actor into the league pool.
         if league is not None and it > 0 and it % agent.snapshot_every == 0:
             league.add(agent.actor)
@@ -74,7 +88,8 @@ def vrpo_loop(paths, iterations=5000, save_every=50, log_every=None,
         trajectories, game_lengths = collect_vectorized(
             agent, players, agent.parallel_games,
             agent.rollout_size, agent.max_half_turns,
-            league=league, league_prob=(agent.league_prob if league else 0.0))
+            league=league, league_prob=(agent.league_prob if league else 0.0),
+            reward_cls=reward_cls)
         # Batch all trajectories' forward passes into 2 GPU calls (vs 2 per
         # trajectory) - see VRPOAgent.process_trajectories.
         flat = [t for seat0, seat1 in trajectories for t in (seat0, seat1) if t]

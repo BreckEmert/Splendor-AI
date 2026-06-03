@@ -449,6 +449,55 @@ class SparseRewardEngine:
         def __call__(self, winner: bool) -> float:
             return 10.0 if winner else -10.0
 
+
+class BlendedRewardEngine:
+    """Anneals shaping -> sparse over training.
+
+    Wraps a BasicRewardEngine and scales every SHAPED component (gems, buy,
+    reserve, noble, and the constant step penalty) by a live alpha read from the
+    agent each move, while keeping the sparse win/loss term (+/-10) at FULL
+    strength always. So:
+        alpha = 1.0  ==  BasicRewardEngine  (full shaping, fast/stable learning)
+        alpha = 0.0  ==  SparseRewardEngine (only +/-10 win/loss)
+    Annealing alpha 1 -> 0 lets the agent learn quickly from the hand-designed
+    signal early, then discover beyond-the-designer strategy late under the pure
+    objective. alpha is read from agent.shaping_alpha (default 1.0 if absent), so
+    one mutable float on the agent drives every game's reward scale.
+    """
+    class _Scaled:
+        """Scales a wrapped reward component's __call__ by the live alpha;
+        delegates everything else (helpers, debug_*) to the inner component."""
+        def __init__(self, parent, inner):
+            self._parent = parent
+            self._inner = inner
+        def __call__(self, *a, **kw):
+            r = self._inner(*a, **kw)
+            return self._parent._alpha * (r if r is not None else 0.0)
+        def __getattr__(self, name):
+            return getattr(self._inner, name)
+
+    def __init__(self, game):
+        self.env = game
+        self.shaped = BasicRewardEngine(game)
+        # Share the metrics cache so rl_game's self.rewards._cache.clear() works
+        # and the shaped engine's caching stays coherent.
+        self._cache = self.shaped._cache
+        self.metrics = self.shaped.metrics
+        self.gems = self._Scaled(self, self.shaped.gems)
+        self.buy = self._Scaled(self, self.shaped.buy)
+        self.reserve = self._Scaled(self, self.shaped.reserve)
+        self.noble = self._Scaled(self, self.shaped.noble)
+        self.game = self.shaped.game            # sparse win/loss: NOT scaled
+
+    @property
+    def _alpha(self) -> float:
+        return float(getattr(self.env.model, 'shaping_alpha', 1.0))
+
+    @property
+    def constant_penalty(self) -> float:
+        return self._alpha * self.shaped.constant_penalty
+
+
 class SparseReserveRewardEngine:
     """Sparse plus trying to fix rewards.  I realize the problem now
     which is that the model can't explore reserving, because at all

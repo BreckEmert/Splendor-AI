@@ -91,6 +91,18 @@ class VRPOAgent:
         self.kl_coef_var = tf.Variable(self.kl_coef_start, trainable=False,
                                        dtype=tf.float32)
 
+        # Reward shaping anneal (shaping -> sparse). shaping_alpha scales every
+        # shaped reward component; the +/-10 win/loss stays full strength. Read
+        # live by BlendedRewardEngine each move. Annealed start->end over
+        # [shape_anneal_start_frac, shape_anneal_end_frac] of the schedule
+        # horizon. Defaults: start=1 end=1 => constant full shaping (no-op unless
+        # the run opts into BlendedRewardEngine AND sets an end<1).
+        self.shaping_alpha = _envf('VRPO_SHAPE_ALPHA', 1.0)   # live value
+        self.shape_alpha_start = _envf('VRPO_SHAPE_ALPHA', 1.0)
+        self.shape_alpha_end = _envf('VRPO_SHAPE_ALPHA_END', self.shape_alpha_start)
+        self.shape_anneal_start_frac = _envf('VRPO_SHAPE_ANNEAL_START', 0.2)
+        self.shape_anneal_end_frac = _envf('VRPO_SHAPE_ANNEAL_END', 0.8)
+
         # Total planned iterations (for LR/KL horizons). Read from env so it
         # matches train_vrpo's VRPO_ITERS; loop may pass fewer (tests) - then
         # the schedules just stay near their start, which is harmless.
@@ -235,6 +247,31 @@ class VRPOAgent:
             return self.kl_coef_start
         frac = min(1.0, self.iteration / float(self.sched_iters))
         return self.kl_coef_start + (self.kl_coef_end - self.kl_coef_start) * frac
+
+    def _current_shaping_alpha(self):
+        """Anneal shaping alpha start->end over a [start_frac, end_frac] window
+        of the schedule horizon: hold at start before the window, linearly ramp
+        within it, hold at end after. Lets the agent learn fast under shaping
+        early, then transition to (near-)sparse late to discover beyond-designer
+        strategy. No-op when start==end."""
+        if self.shape_alpha_end == self.shape_alpha_start or self.sched_iters <= 1:
+            return self.shape_alpha_start
+        p = self.iteration / float(self.sched_iters)
+        lo, hi = self.shape_anneal_start_frac, self.shape_anneal_end_frac
+        if p <= lo:
+            w = 0.0
+        elif p >= hi:
+            w = 1.0
+        else:
+            w = (p - lo) / max(hi - lo, 1e-6)
+        return self.shape_alpha_start + (self.shape_alpha_end - self.shape_alpha_start) * w
+
+    def update_schedules(self):
+        """Refresh per-iteration annealed values that the ROLLOUT depends on.
+        Must be called before collecting the rollout (the reward engine reads
+        shaping_alpha during the games). kl_coef is set in update() since it only
+        affects the actor loss."""
+        self.shaping_alpha = self._current_shaping_alpha()
 
     def remember(self, entry) -> None:
         self.memory.append(entry)
@@ -506,6 +543,7 @@ class VRPOAgent:
             tf.summary.scalar('VRPO/adv_std', float(np.std(adv)), step=step)
             tf.summary.scalar('VRPO/q_target_mean', float(np.mean(q_target)), step=step)
             tf.summary.scalar('VRPO/kl_coef', float(self.kl_coef_var.numpy()), step=step)
+            tf.summary.scalar('VRPO/shaping_alpha', float(self.shaping_alpha), step=step)
             tf.summary.scalar('VRPO/actor_lr', self._current_lr(), step=step)
             if game_lengths:
                 # Secondary proxy only: game length tracks strength while it is
