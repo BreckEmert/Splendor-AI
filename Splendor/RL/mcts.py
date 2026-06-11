@@ -10,7 +10,8 @@ with ONE forward pass; Splendor endgames are tactical races and blocking
 sequences that are depth problems, not representation problems. Search spends
 test-time compute on the exact decision at hand, using the nets we already
 have: the actor as a move prior, the critic as a leaf evaluator.
-(First result: same-weights search @150 sims beat greedy 25-5.)
+(Measured: same-weights search vs greedy = 63% @25 sims, 83% @150, 97% @400;
+search @150 sims beat the original DQN 29-1.)
 
 Design notes (each is a deliberate choice):
 - SIMULATION on the real engine: we snapshot the live game, replay candidate
@@ -33,20 +34,22 @@ Design notes (each is a deliberate choice):
   -1.
 - LEAF VALUE: V = sum_a pi(a|s) * Q(s,a) from the critic (the same policy
   expectation VRPO trains), squashed with tanh(V / value_scale) into [-1, 1].
-  The critic was trained on shaped rewards, so this is a heuristic ordering,
-  not a calibrated win probability - fine for search, which mostly needs
-  relative comparisons plus exact terminals.
-- BATCHED LEAF EVALUATION (the speed fix): profiling showed ~all per-sim cost
-  was the two single-row NN calls per leaf, not the engine. We now run
-  `eval_batch` descents to their leaves first, then evaluate every pending
-  leaf in ONE batched actor call + ONE batched critic call. To stop in-batch
-  descents from piling down the identical path (the tree doesn't change until
-  values arrive), each descent applies a VIRTUAL LOSS (N+1, W-1) along its
-  edges, which is undone exactly when its real value is backed up. This is
-  the standard AlphaZero-style tradeoff: a tiny amount of per-sim selection
-  quality for a large wall-clock win. eval_batch=1 reproduces the fully
-  sequential algorithm exactly (a single descent never revisits a node, so
-  its own virtual losses cannot influence its own selections).
+  Backed-up search values are therefore ALWAYS in [-1, 1] (tanh leaves, exact
+  +/-1 terminals) regardless of the critic's output scale - which is what
+  makes root W/N usable as scale-consistent critic targets for the AlphaZero
+  training loop (RL/azero.py).
+- BATCHED LEAF EVALUATION: profiling showed ~all per-sim cost was the two
+  single-row NN calls per leaf, not the engine. We run `eval_batch` descents
+  to their leaves, then evaluate every pending leaf in ONE batched actor call
+  + ONE batched critic call. To stop in-batch descents from piling down the
+  identical path, each descent applies a VIRTUAL LOSS (N+1, W-1) along its
+  edges, undone exactly when its real value is backed up. eval_batch=1
+  reproduces the fully sequential algorithm exactly. Measured: 0.75s ->
+  0.18s/move (batch 8) at 150 sims; strength preserved (9-3 vs greedy).
+- ROOT DIRICHLET NOISE (training-data generation only): root_noise=True mixes
+  Dir(alpha) over legal moves into the root prior, AlphaZero-style, so
+  self-play data explores beyond the actor's current preferences. Eval play
+  leaves it off.
 """
 
 import random
@@ -114,19 +117,27 @@ class _Node:
 
 class SearchAgent:
     """Chooses moves by PUCT search using a trained actor (prior) + critic
-    (leaf value). choose_move(game) reads the live game, never mutates it.
+    (leaf value). Accepts .keras paths or live in-memory Keras models (the
+    AlphaZero loop passes the models it is training). choose_move(game) reads
+    the live game and never mutates it.
     """
 
-    def __init__(self, actor_path, critic_path, sims=150, c_puct=2.0,
-                 value_scale=5.0, max_half_turns=300, eval_batch=8, seed=None):
-        self.actor = load_model(actor_path, compile=False)
-        self.critic = load_model(critic_path, compile=False)
+    def __init__(self, actor, critic, sims=150, c_puct=2.0,
+                 value_scale=5.0, max_half_turns=300, eval_batch=8,
+                 root_noise=False, dirichlet_alpha=0.3, dirichlet_eps=0.25,
+                 seed=None):
+        self.actor = load_model(actor, compile=False) if isinstance(actor, str) else actor
+        self.critic = load_model(critic, compile=False) if isinstance(critic, str) else critic
         self.sims = sims
         self.c_puct = c_puct
         self.value_scale = value_scale
         self.max_half_turns = max_half_turns
         self.eval_batch = max(1, eval_batch)
+        self.root_noise = root_noise
+        self.dirichlet_alpha = dirichlet_alpha
+        self.dirichlet_eps = dirichlet_eps
         self._rng = random.Random(seed)
+        self._np_rng = np.random.default_rng(seed)
         # Scratch game for simulations, restored from a snapshot every sim.
         # Player agents are never consulted (we drive apply_move directly).
         self._sim = EvalGame([('S0', None, 0), ('S1', None, 1)],
@@ -152,14 +163,41 @@ class SearchAgent:
         priors, v = self._priors_value(logits, q, legal)
         return priors, legal, v
 
-    # -- core ------------------------------------------------------------ #
+    # -- public API ------------------------------------------------------ #
     def choose_move(self, game):
+        """Eval play: most-visited root move (no root noise unless set)."""
+        root = self._run_sims(game)
+        return int(np.argmax(root.N))
+
+    def search_policy(self, game):
+        """Training-data generation: run the same search and expose the root
+        statistics. Returns (pi, N, Q, legal) where pi = N / sum(N) is the
+        visit distribution (the actor's training target), and Q[a] = W[a]/N[a]
+        for visited actions (0 elsewhere) are the search-backed action values
+        in [-1, 1] (the critic's training targets). Caller handles temperature
+        sampling vs argmax.
+        """
+        root = self._run_sims(game)
+        n_sum = root.N.sum()
+        pi = root.N / n_sum if n_sum > 0 else root.P
+        q = np.divide(root.W, root.N, out=np.zeros_like(root.W),
+                      where=root.N > 0)
+        return pi, root.N.copy(), q, root.legal.copy()
+
+    # -- core ------------------------------------------------------------ #
+    def _run_sims(self, game):
         root_snap = snapshot(game)
         tree = {}
 
         # Root expansion (root state is fully known; decks only affect draws).
         restore(self._sim, root_snap)
         priors, legal, _ = self._evaluate_single(self._sim)
+        if self.root_noise:
+            idx = np.flatnonzero(legal)
+            noise = self._np_rng.dirichlet(
+                np.full(len(idx), self.dirichlet_alpha))
+            priors = priors * (1.0 - self.dirichlet_eps)
+            priors[idx] += self.dirichlet_eps * noise
         tree[()] = _Node(priors, legal)
 
         done = 0
@@ -242,8 +280,7 @@ class SearchAgent:
 
             done += k
 
-        root = tree[()]
-        return int(np.argmax(root.N))                # most-visited move
+        return tree[()]
 
     def _select(self, node, avail):
         idx = np.flatnonzero(avail)
