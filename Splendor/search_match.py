@@ -62,6 +62,8 @@ def main(argv):
     ap.add_argument("--sims", type=int, default=150)
     ap.add_argument("--games", type=int, default=20)
     ap.add_argument("--c-puct", type=float, default=2.0)
+    ap.add_argument("--eval-batch", type=int, default=8,
+                    help="leaves evaluated per batched NN call (1 = sequential)")
     ap.add_argument("--actor", default=CHAMP_ACTOR)
     ap.add_argument("--critic", default=CHAMP_CRITIC)
     ap.add_argument("--opponent", default=None,
@@ -75,7 +77,7 @@ def main(argv):
     print(f"greedy : {os.path.basename(opp_path)}")
 
     search = SearchAgent(args.actor, args.critic, sims=args.sims,
-                         c_puct=args.c_puct,
+                         c_puct=args.c_puct, eval_batch=args.eval_batch,
                          max_half_turns=args.max_half_turns, seed=args.seed)
     opp = KerasGreedyOpponent(opp_path)
 

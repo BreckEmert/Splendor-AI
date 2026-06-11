@@ -10,6 +10,7 @@ with ONE forward pass; Splendor endgames are tactical races and blocking
 sequences that are depth problems, not representation problems. Search spends
 test-time compute on the exact decision at hand, using the nets we already
 have: the actor as a move prior, the critic as a leaf evaluator.
+(First result: same-weights search @150 sims beat greedy 25-5.)
 
 Design notes (each is a deliberate choice):
 - SIMULATION on the real engine: we snapshot the live game, replay candidate
@@ -35,6 +36,17 @@ Design notes (each is a deliberate choice):
   The critic was trained on shaped rewards, so this is a heuristic ordering,
   not a calibrated win probability - fine for search, which mostly needs
   relative comparisons plus exact terminals.
+- BATCHED LEAF EVALUATION (the speed fix): profiling showed ~all per-sim cost
+  was the two single-row NN calls per leaf, not the engine. We now run
+  `eval_batch` descents to their leaves first, then evaluate every pending
+  leaf in ONE batched actor call + ONE batched critic call. To stop in-batch
+  descents from piling down the identical path (the tree doesn't change until
+  values arrive), each descent applies a VIRTUAL LOSS (N+1, W-1) along its
+  edges, which is undone exactly when its real value is backed up. This is
+  the standard AlphaZero-style tradeoff: a tiny amount of per-sim selection
+  quality for a large wall-clock win. eval_batch=1 reproduces the fully
+  sequential algorithm exactly (a single descent never revisits a node, so
+  its own virtual losses cannot influence its own selections).
 """
 
 import random
@@ -106,35 +118,38 @@ class SearchAgent:
     """
 
     def __init__(self, actor_path, critic_path, sims=150, c_puct=2.0,
-                 value_scale=5.0, max_half_turns=300, seed=None):
+                 value_scale=5.0, max_half_turns=300, eval_batch=8, seed=None):
         self.actor = load_model(actor_path, compile=False)
         self.critic = load_model(critic_path, compile=False)
         self.sims = sims
         self.c_puct = c_puct
         self.value_scale = value_scale
         self.max_half_turns = max_half_turns
+        self.eval_batch = max(1, eval_batch)
         self._rng = random.Random(seed)
         # Scratch game for simulations, restored from a snapshot every sim.
         # Player agents are never consulted (we drive apply_move directly).
         self._sim = EvalGame([('S0', None, 0), ('S1', None, 1)],
                              max_half_turns=max_half_turns)
 
-    # -- NN helpers (single-row; search is sequential by nature) -------- #
-    def _evaluate(self, game):
-        """Priors over legal moves + tanh-squashed value, for the player to
-        move in `game`. Returns (priors, legal_mask, value)."""
+    # -- NN helpers ------------------------------------------------------ #
+    def _priors_value(self, logits, q, legal):
+        """Masked-softmax priors + tanh-squashed policy-expectation value."""
+        z = np.where(legal, logits, -np.inf)
+        z = z - z.max()
+        e = np.exp(z, where=np.isfinite(z), out=np.zeros_like(z))
+        priors = e / e.sum()
+        v = float(np.tanh((priors * q).sum() / self.value_scale))
+        return priors, v
+
+    def _evaluate_single(self, game):
+        """Single-row eval (root only). Returns (priors, legal, value)."""
         state = game.to_state()
         legal = game.active_player.get_legal_moves(game.board)
         s = tf.convert_to_tensor(state[None, :], dtype=tf.float32)
         logits = self.actor(s, training=False).numpy()[0]
         q = self.critic(s, training=False).numpy()[0]
-
-        z = np.where(legal, logits, -np.inf)
-        z = z - z.max()
-        e = np.exp(z, where=np.isfinite(z), out=np.zeros_like(z))
-        priors = e / e.sum()
-
-        v = float(np.tanh((priors * q).sum() / self.value_scale))
+        priors, v = self._priors_value(logits, q, legal)
         return priors, legal, v
 
     # -- core ------------------------------------------------------------ #
@@ -144,51 +159,88 @@ class SearchAgent:
 
         # Root expansion (root state is fully known; decks only affect draws).
         restore(self._sim, root_snap)
-        priors, legal, _ = self._evaluate(self._sim)
+        priors, legal, _ = self._evaluate_single(self._sim)
         tree[()] = _Node(priors, legal)
 
-        for _ in range(self.sims):
-            restore(self._sim, root_snap)
-            for d in self._sim.board.decks:          # determinize hidden order
-                self._rng.shuffle(d.cards)
+        done = 0
+        while done < self.sims:
+            k = min(self.eval_batch, self.sims - done)
 
-            path = ()
-            edges = []                                # [(node, action), ...]
-            v = None
-            while True:
-                node = tree[path]
-                # Restrict to moves legal in THIS determinization.
-                cur_legal = self._sim.active_player.get_legal_moves(self._sim.board)
-                avail = node.legal & cur_legal
-                if not avail.any():
-                    avail = cur_legal                # tree mask useless here
-                a = self._select(node, avail)
-                edges.append((node, a))
+            # Phase 1: run k descents, applying virtual loss along each path.
+            pending = []
+            for _ in range(k):
+                restore(self._sim, root_snap)
+                for d in self._sim.board.decks:      # determinize hidden order
+                    self._rng.shuffle(d.cards)
 
-                self._sim.rewards._cache.clear()
-                self._sim.apply_move(a)
-                self._sim.half_turns += 1
+                path = ()
+                edges = []                            # [(node, action), ...]
+                v = None
+                state = mask = None
+                expand = False
+                while True:
+                    node = tree[path]
+                    cur_legal = self._sim.active_player.get_legal_moves(
+                        self._sim.board)
+                    avail = node.legal & cur_legal
+                    if not avail.any():
+                        avail = cur_legal             # tree mask useless here
+                    a = self._select(node, avail)
+                    edges.append((node, a))
+                    node.N[a] += 1.0                  # virtual loss on
+                    node.W[a] -= 1.0
 
-                if self._sim.victor:
-                    v = -1.0                          # mover won; to-move lost
-                    break
-                if self._sim.half_turns >= self.max_half_turns:
-                    *_, v = self._evaluate(self._sim)
-                    break
+                    self._sim.rewards._cache.clear()
+                    self._sim.apply_move(a)
+                    self._sim.half_turns += 1
 
-                path = path + (a,)
-                if path not in tree:
-                    priors, legal, v = self._evaluate(self._sim)
-                    tree[path] = _Node(priors, legal)
-                    break
+                    if self._sim.victor:
+                        v = -1.0                      # mover won; to-move lost
+                        break
+                    if self._sim.half_turns >= self.max_half_turns:
+                        state = self._sim.to_state()  # value only, no expand
+                        mask = self._sim.active_player.get_legal_moves(
+                            self._sim.board)
+                        break
 
-            # Negamax backup: v is from the perspective of the player to move
-            # at the leaf; flip once per edge walking back to the root.
-            w = v
-            for node, a in reversed(edges):
-                w = -w
-                node.W[a] += w
-                node.N[a] += 1
+                    path = path + (a,)
+                    if path not in tree:
+                        state = self._sim.to_state()
+                        mask = self._sim.active_player.get_legal_moves(
+                            self._sim.board)
+                        expand = True
+                        break
+
+                pending.append({'path': path, 'edges': edges, 'v': v,
+                                'state': state, 'mask': mask,
+                                'expand': expand})
+
+            # Phase 2: ONE batched actor + critic call for all pending leaves.
+            need = [p for p in pending if p['state'] is not None]
+            if need:
+                S = tf.convert_to_tensor(
+                    np.stack([p['state'] for p in need]), dtype=tf.float32)
+                logits = self.actor(S, training=False).numpy()
+                qs = self.critic(S, training=False).numpy()
+                for row, p in enumerate(need):
+                    pri, v = self._priors_value(logits[row], qs[row], p['mask'])
+                    p['v'] = v
+                    # Two in-batch descents can reach the same new path; the
+                    # first expansion wins, the second still backs up its value.
+                    if p['expand'] and p['path'] not in tree:
+                        tree[p['path']] = _Node(pri, p['mask'])
+
+            # Phase 3: undo virtual loss and apply the real negamax backup.
+            for p in pending:
+                w = p['v']
+                for node, a in reversed(p['edges']):
+                    node.N[a] -= 1.0                  # virtual loss off
+                    node.W[a] += 1.0
+                    w = -w
+                    node.W[a] += w
+                    node.N[a] += 1.0
+
+            done += k
 
         root = tree[()]
         return int(np.argmax(root.N))                # most-visited move
