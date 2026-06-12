@@ -112,7 +112,7 @@ class GUIGame:
 
         # Take gems moves
         if move_idx < player.take_dim:
-            gems_to_take: np.ndarray = np.zeros(6)
+            gems_to_take: np.ndarray = np.zeros(6, dtype=int)
             if move_idx < 40: # all_takes_3; 10 * 4discards
                 gems_to_take = player.all_takes_3[move_idx // 4]
             elif move_idx < 55: # all_takes_2_same; 5 * 3discards
