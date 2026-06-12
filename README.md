@@ -4,6 +4,8 @@ Welcome to the Splendor-AI repository! This project allows you to build and play
 
 I'm quite proud of this project as there's a long list of repos and papers which have attempted to make this agent but almost all fail and none have surpassed human performance.  I was able to get there through Double-DQN with PER + dueling heads, and an extremely tuned state/action space.  Splendor has an unmanageable action space by default, so my key contribution is what I chose to keep in the action space and what to apply heuristics to (note that I kept this a pure RL approach: absolutely no intelligent logic or calculations are injected into the model[^1][^4]).
 
+Note that the game logic and machine learning done on this branch are all written by me.  Maybe 75% of the pygame setup is written by me.  I have since tried out AI coding tools (I wrote this project before AI was capable of doing anything like this) and pushed several new branches, to take a look at how some papers I've read in RL work for this repo, for fun (considering this project had been finished for a year).  They are very interesting algorithms, but are not needed to reach human-level performance.  Of course, the MCTS alpha-zero-style branch works very well, but is not in the spirit of making something that understands the game from "base principles" which is why it is not a part of this main branch.  Other, AI-written approaches remain isolated to those branches.
+
 ## Play now at https://breckemert.github.io/Splendor-Webapp/
 
 ## Overview
