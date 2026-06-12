@@ -66,6 +66,9 @@ def main(argv):
                     help="leaves evaluated per batched NN call (1 = sequential)")
     ap.add_argument("--actor", default=CHAMP_ACTOR)
     ap.add_argument("--critic", default=CHAMP_CRITIC)
+    ap.add_argument("--aznet", default=None,
+                    help="two-headed AZ net .keras; overrides --actor/--critic "
+                         "for the search side")
     ap.add_argument("--opponent", default=None,
                     help="opponent .keras (default: same actor, greedy)")
     ap.add_argument("--max-half-turns", type=int, default=300)
@@ -73,12 +76,18 @@ def main(argv):
     args = ap.parse_args(argv)
 
     opp_path = args.opponent or args.actor
-    print(f"search : {os.path.basename(args.actor)}  ({args.sims} sims/move)")
+    search_desc = args.aznet or args.actor
+    print(f"search : {os.path.basename(search_desc)}  ({args.sims} sims/move)")
     print(f"greedy : {os.path.basename(opp_path)}")
 
-    search = SearchAgent(args.actor, args.critic, sims=args.sims,
-                         c_puct=args.c_puct, eval_batch=args.eval_batch,
-                         max_half_turns=args.max_half_turns, seed=args.seed)
+    if args.aznet:
+        search = SearchAgent(args.aznet, None, sims=args.sims,
+                             c_puct=args.c_puct, eval_batch=args.eval_batch,
+                             max_half_turns=args.max_half_turns, seed=args.seed)
+    else:
+        search = SearchAgent(args.actor, args.critic, sims=args.sims,
+                             c_puct=args.c_puct, eval_batch=args.eval_batch,
+                             max_half_turns=args.max_half_turns, seed=args.seed)
     opp = KerasGreedyOpponent(opp_path)
 
     wins = losses = draws = 0

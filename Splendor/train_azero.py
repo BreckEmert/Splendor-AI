@@ -1,14 +1,18 @@
 # Splendor/train_azero.py
 """
-Entry point for the AlphaZero-style loop (RL/azero.py): search-generated
-self-play data -> train actor on visit distributions + critic on search-backed
-values -> stronger nets -> stronger search. Warm-starts from the tournament
-champion; checkpoints and TensorBoard land in the usual shared directories.
+Entry point for the AlphaZero-style loop, v2 (RL/azero.py): one two-headed net
+(policy + scalar tanh value), warm-started by copying the champion actor's
+weights into the trunk + policy head. Gen 0 self-play uses the legacy
+actor+critic search while the fresh value head trains; later gens use the
+two-headed net (half the NN calls per leaf).
 
 Knobs (env): AZ_GENS, AZ_GAMES_PER_GEN, AZ_SIMS, AZ_EVAL_BATCH, AZ_TEMP_MOVES,
-AZ_WINDOW, AZ_EPOCHS, AZ_BATCH, AZ_LR, AZ_EVAL_GAMES, plus AZ_WARM_ACTOR /
-AZ_WARM_CRITIC to start from a different checkpoint. Example:
-    AZ_GENS=12 AZ_GAMES_PER_GEN=150 python train_azero.py
+AZ_WINDOW, AZ_EPOCHS, AZ_BATCH, AZ_LR, AZ_VLOSS, AZ_EVAL_GAMES, AZ_LAYERS
+(e.g. "1024-1024-512": trunk size; warm start requires it to match the
+champion's 512-512-256, otherwise the net trains from scratch), and
+AZ_WARM_AZNET to RESUME from a saved v2 generation checkpoint. Examples:
+    python train_azero.py
+    AZ_WARM_AZNET=RL/trained_agents/<stamp>__aznet_gen7.keras python train_azero.py
 """
 
 import os
@@ -27,31 +31,31 @@ def get_paths():
     agents_dir = os.path.join(rl_dir, "trained_agents")
     tb_root = os.path.join(rl_dir, "saved_files", "tensorboard_logs")
 
+    layers = [int(x) for x in
+              os.getenv('AZ_LAYERS', '512-512-256').replace(',', '-').split('-')]
     stamp = (datetime.now() - timedelta(hours=6)).strftime("%m-%d-%H-%M")
-    nickname = f"{stamp}__azero"
+    nickname = f"{stamp}__aznet"
 
-    warm_actor = os.getenv('AZ_WARM_ACTOR',
-                           os.path.join(agents_dir, CHAMP_ACTOR))
-    warm_critic = os.getenv('AZ_WARM_CRITIC',
-                            warm_actor.replace('_actor.keras', '_critic.keras'))
-    # Eval baseline stays the ORIGINAL champion by default even when resuming
-    # from a gen checkpoint, so raw_wr_vs_champ is comparable across runs.
-    baseline = os.getenv('AZ_BASELINE', os.path.join(agents_dir, CHAMP_ACTOR))
+    warm_actor = os.path.join(agents_dir, CHAMP_ACTOR)
+    warm_critic = warm_actor.replace('_actor.keras', '_critic.keras')
+    baseline = os.getenv('AZ_BASELINE', warm_actor)
+    warm_aznet = os.getenv('AZ_WARM_AZNET')          # resume (optional)
 
     paths = {
+        'layers': layers,
         'warm_actor': warm_actor,
         'warm_critic': warm_critic,
+        'warm_aznet': warm_aznet,
         'baseline': baseline,
-        'gen_actor': os.path.join(agents_dir, nickname + "_gen{gen}_actor.keras"),
-        'gen_critic': os.path.join(agents_dir, nickname + "_gen{gen}_critic.keras"),
-        'best_actor': os.path.join(agents_dir, nickname + "_best_actor.keras"),
-        'best_critic': os.path.join(agents_dir, nickname + "_best_critic.keras"),
+        'gen_net': os.path.join(agents_dir, nickname + "_gen{gen}.keras"),
+        'best_net': os.path.join(agents_dir, nickname + "_best.keras"),
         'tensorboard_dir': os.path.join(tb_root, nickname),
     }
     os.makedirs(paths['tensorboard_dir'], exist_ok=True)
-    assert os.path.exists(warm_actor), f"warm-start actor missing: {warm_actor}"
-    assert os.path.exists(warm_critic), f"warm-start critic missing: {warm_critic}"
-    assert os.path.exists(baseline), f"eval baseline missing: {baseline}"
+    for key in ('warm_actor', 'warm_critic', 'baseline'):
+        assert os.path.exists(paths[key]), f"{key} missing: {paths[key]}"
+    if warm_aznet:
+        assert os.path.exists(warm_aznet), f"resume net missing: {warm_aznet}"
     return paths
 
 

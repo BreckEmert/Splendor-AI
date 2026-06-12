@@ -127,7 +127,12 @@ class SearchAgent:
                  root_noise=False, dirichlet_alpha=0.3, dirichlet_eps=0.25,
                  seed=None):
         self.actor = load_model(actor, compile=False) if isinstance(actor, str) else actor
-        self.critic = load_model(critic, compile=False) if isinstance(critic, str) else critic
+        # critic=None => two-headed AlphaZero net: `actor` returns
+        # [policy_logits, tanh_value] in ONE call (half the NN calls per leaf;
+        # value already in [-1,1], so value_scale is unused in this mode).
+        self.critic = (None if critic is None else
+                       load_model(critic, compile=False) if isinstance(critic, str)
+                       else critic)
         self.sims = sims
         self.c_puct = c_puct
         self.value_scale = value_scale
@@ -144,12 +149,16 @@ class SearchAgent:
                              max_half_turns=max_half_turns)
 
     # -- NN helpers ------------------------------------------------------ #
-    def _priors_value(self, logits, q, legal):
-        """Masked-softmax priors + tanh-squashed policy-expectation value."""
+    def _priors(self, logits, legal):
         z = np.where(legal, logits, -np.inf)
         z = z - z.max()
         e = np.exp(z, where=np.isfinite(z), out=np.zeros_like(z))
-        priors = e / e.sum()
+        return e / e.sum()
+
+    def _priors_value(self, logits, q, legal):
+        """Masked-softmax priors + tanh-squashed policy-expectation value
+        (actor+critic mode)."""
+        priors = self._priors(logits, legal)
         v = float(np.tanh((priors * q).sum() / self.value_scale))
         return priors, v
 
@@ -158,9 +167,14 @@ class SearchAgent:
         state = game.to_state()
         legal = game.active_player.get_legal_moves(game.board)
         s = tf.convert_to_tensor(state[None, :], dtype=tf.float32)
-        logits = self.actor(s, training=False).numpy()[0]
-        q = self.critic(s, training=False).numpy()[0]
-        priors, v = self._priors_value(logits, q, legal)
+        if self.critic is None:
+            logits, value = self.actor(s, training=False)
+            priors = self._priors(logits.numpy()[0], legal)
+            v = float(value.numpy()[0, 0])
+        else:
+            logits = self.actor(s, training=False).numpy()[0]
+            q = self.critic(s, training=False).numpy()[0]
+            priors, v = self._priors_value(logits, q, legal)
         return priors, legal, v
 
     # -- public API ------------------------------------------------------ #
@@ -253,15 +267,25 @@ class SearchAgent:
                                 'state': state, 'mask': mask,
                                 'expand': expand})
 
-            # Phase 2: ONE batched actor + critic call for all pending leaves.
+            # Phase 2: ONE batched NN evaluation for all pending leaves
+            # (single two-headed call in AZ mode; actor + critic otherwise).
             need = [p for p in pending if p['state'] is not None]
             if need:
                 S = tf.convert_to_tensor(
                     np.stack([p['state'] for p in need]), dtype=tf.float32)
-                logits = self.actor(S, training=False).numpy()
-                qs = self.critic(S, training=False).numpy()
+                if self.critic is None:
+                    lg, vals = self.actor(S, training=False)
+                    logits, vs = lg.numpy(), vals.numpy()[:, 0]
+                else:
+                    logits = self.actor(S, training=False).numpy()
+                    qs = self.critic(S, training=False).numpy()
                 for row, p in enumerate(need):
-                    pri, v = self._priors_value(logits[row], qs[row], p['mask'])
+                    if self.critic is None:
+                        pri = self._priors(logits[row], p['mask'])
+                        v = float(vs[row])
+                    else:
+                        pri, v = self._priors_value(logits[row], qs[row],
+                                                    p['mask'])
                     p['v'] = v
                     # Two in-batch descents can reach the same new path; the
                     # first expansion wins, the second still backs up its value.
