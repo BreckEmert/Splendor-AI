@@ -34,10 +34,14 @@ def get_paths():
                            os.path.join(agents_dir, CHAMP_ACTOR))
     warm_critic = os.getenv('AZ_WARM_CRITIC',
                             warm_actor.replace('_actor.keras', '_critic.keras'))
+    # Eval baseline stays the ORIGINAL champion by default even when resuming
+    # from a gen checkpoint, so raw_wr_vs_champ is comparable across runs.
+    baseline = os.getenv('AZ_BASELINE', os.path.join(agents_dir, CHAMP_ACTOR))
 
     paths = {
         'warm_actor': warm_actor,
         'warm_critic': warm_critic,
+        'baseline': baseline,
         'gen_actor': os.path.join(agents_dir, nickname + "_gen{gen}_actor.keras"),
         'gen_critic': os.path.join(agents_dir, nickname + "_gen{gen}_critic.keras"),
         'best_actor': os.path.join(agents_dir, nickname + "_best_actor.keras"),
@@ -47,6 +51,7 @@ def get_paths():
     os.makedirs(paths['tensorboard_dir'], exist_ok=True)
     assert os.path.exists(warm_actor), f"warm-start actor missing: {warm_actor}"
     assert os.path.exists(warm_critic), f"warm-start critic missing: {warm_critic}"
+    assert os.path.exists(baseline), f"eval baseline missing: {baseline}"
     return paths
 
 

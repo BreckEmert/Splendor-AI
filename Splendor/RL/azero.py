@@ -32,6 +32,7 @@ been trained on [-1,1] search targets, later generations use value_scale=1.
 """
 
 import os
+import time
 from collections import deque
 
 import numpy as np
@@ -85,11 +86,16 @@ class AZeroLoop:
               f"sims={self.sims} temp_moves={self.temp_moves} "
               f"window={self.window_gens} epochs={self.epochs} lr={self.lr}")
 
-        # Live nets being trained, warm-started from the champion.
+        # Live nets being trained, warm-started from the champion (or, on
+        # resume, from the latest generation checkpoint via AZ_WARM_ACTOR).
         self.actor = load_model(paths['warm_actor'], compile=False)
         self.critic = load_model(paths['warm_critic'], compile=False)
-        # Frozen baseline for the per-gen raw-strength eval.
-        self.baseline = _GreedyNet(load_model(paths['warm_actor'], compile=False))
+        # Frozen baseline for the per-gen raw-strength eval. Deliberately
+        # SEPARATE from the warm start so resumed runs keep measuring against
+        # the same original champion and winrates stay comparable across runs.
+        self.baseline = _GreedyNet(
+            load_model(paths.get('baseline', paths['warm_actor']),
+                       compile=False))
 
         self.actor_opt = Adam(learning_rate=self.lr, clipnorm=1.0)
         self.critic_opt = Adam(learning_rate=self.lr, clipnorm=1.0)
@@ -113,7 +119,13 @@ class AZeroLoop:
         S, PI, QT, QM, LG = [], [], [], [], []
         seat_idx, played = [], []
         lengths = []
+        t0 = time.perf_counter()
         for g in range(self.games_per_gen):
+            if g and g % 25 == 0:               # heartbeat for long generations
+                pace = (time.perf_counter() - t0) / g
+                eta = pace * (self.games_per_gen - g) / 60.0
+                print(f"  gen {gen}: {g}/{self.games_per_gen} games, "
+                      f"{pace:.1f}s/game, ~{eta:.0f}min left", flush=True)
             game = EvalGame([('A', None, 0), ('B', None, 1)],
                             max_half_turns=self.max_half_turns)
             game_rows = []                      # (row_index, seat)
