@@ -236,13 +236,23 @@ class AZeroLoop:
                   f"pi_loss={pi_loss:.4f} q_loss={q_loss:.4f} "
                   f"raw_wr_vs_champ={wr:.3f}")
 
-            self.actor.save(self.paths['gen_actor'].format(gen=gen))
-            self.critic.save(self.paths['gen_critic'].format(gen=gen))
+            gen_a = self.paths['gen_actor'].format(gen=gen)
+            gen_c = self.paths['gen_critic'].format(gen=gen)
+            self.actor.save(gen_a)
+            self.critic.save(gen_c)
+            # Print verifiable proof of every save: absolute path + size on
+            # disk (so a vanished checkpoint is noticed immediately, not at
+            # resume time).
+            for f in (gen_a, gen_c):
+                assert os.path.exists(f), f"checkpoint missing after save: {f}"
+                print(f"  saved {os.path.abspath(f)} "
+                      f"({os.path.getsize(f)/1e6:.1f} MB)", flush=True)
             if wr > self.best_wr:
                 self.best_wr = wr
                 self.actor.save(self.paths['best_actor'])
                 self.critic.save(self.paths['best_critic'])
-                print(f"  ** new best raw winrate {wr:.3f} -> saved best ckpt")
+                print(f"  ** new best raw winrate {wr:.3f} -> saved "
+                      f"{os.path.abspath(self.paths['best_actor'])}", flush=True)
 
         print(f"AZero loop complete. Best raw winrate vs champion: "
               f"{self.best_wr:.3f}")
